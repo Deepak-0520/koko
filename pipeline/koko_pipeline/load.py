@@ -113,6 +113,15 @@ def _load_file(conn, layer: str, path: Path) -> int:
         conn.execute(f"""INSERT INTO koko.municipality_parts (code, geom)
                          SELECT code, ST_Subdivide(geom, {MAX_VERTICES}) FROM koko.municipalities
                          WHERE pref_code = %s""", (src,))
+    elif layer == "buildings":
+        # PLATEAU building IDs are unique per city, but two datasets can share a border building:
+        # go through a staging table and skip IDs that another dataset already loaded
+        conn.execute("DELETE FROM koko.buildings WHERE src = %s", (src,))
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS buildings_in (LIKE koko.buildings) ON COMMIT DELETE ROWS")
+        copy_gdf(conn, gdf, "buildings_in") if len(gdf) else 0
+        n = conn.execute("INSERT INTO koko.buildings SELECT * FROM buildings_in ON CONFLICT (id) DO NOTHING").rowcount
+        if n < len(gdf):
+            log.warning("buildings %s: skipped %d duplicate IDs already loaded from another dataset", src, len(gdf) - n)
     else:
         conn.execute(f"DELETE FROM {table} WHERE src = %s", (src,))
         n = copy_gdf(conn, gdf, table) if len(gdf) else 0

@@ -187,5 +187,11 @@ def stage_city(city_code: str, own_codes: set[str]) -> gpd.GeoDataFrame:
             log.info("  [%d/%d] %s: %d buildings", i, len(members), Path(name).name, len(rows) - before)
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:6668").to_crs("EPSG:4326")
     gdf["city_code"] = gdf["city_code"].fillna(gdf["id"].str[:5])
+    parsed = len(gdf)
     gdf = gdf[gdf["city_code"].isin(own_codes | {city_code})].drop_duplicates("id")
+    log.info("PLATEAU %s: kept %d of %d parsed buildings (others belong to neighbouring datasets)",
+             city_code, len(gdf), parsed)
+    if parsed and not len(gdf):
+        log.warning("PLATEAU %s: every building was dropped; building city codes seen: %s",
+                    city_code, sorted(set(gpd.GeoDataFrame(rows)["city_code"].dropna()))[:20])
     return gdf.astype({"storeys_above": "Int16", "storeys_below": "Int16"})

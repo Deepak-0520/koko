@@ -35,7 +35,7 @@ TOKYO_23 = [f"131{n:02d}" for n in range(1, 24)]
 MAJOR_CITIES = {
     "01100": "Sapporo", "04100": "Sendai", "11100": "Saitama", "12100": "Chiba",
     "14100": "Yokohama", "14130": "Kawasaki", "22100": "Shizuoka", "22130": "Hamamatsu",
-    "23100": "Nagoya", "26100": "Kyoto", "27100": "Osaka", "28100": "Kobe",
+    "23100": "Nagoya", "26100": "Kyoto", "27100": "Osaka",
     "34100": "Hiroshima", "40100": "Kitakyushu", "40130": "Fukuoka", "43100": "Kumamoto",
 }
 

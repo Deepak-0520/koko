@@ -129,8 +129,16 @@ def _own_codes(city_code: str) -> set[str]:
     _pref_area(pref)  # makes sure municipalities for the prefecture are staged
     munis = gpd.read_parquet(_path("municipalities", pref))
     city_name = plateau.catalog_entry(city_code)["city"]
-    wards = munis.loc[(munis["city_ja"] == city_name) & munis["ward_ja"].notna(), "code"]
-    return {city_code, *wards}
+    wards = set(munis.loc[(munis["city_ja"] == city_name) & munis["ward_ja"].notna(), "code"])
+    if not wards:
+        return {city_code}
+    # Ward codes that no longer exist (e.g. Hamamatsu merged 7 wards into 3 in 2024) are still used by
+    # older PLATEAU data. A designated city's wards are numbered just above it (22130 -> 22131..),
+    # so claim the codes in that range that are neither another municipality nor another PLATEAU city.
+    others = set(munis["code"]) - wards
+    catalog = set(plateau.all_city_codes())
+    old = {f"{n:05d}" for n in range(int(city_code) + 1, int(city_code) + 30)} - others - catalog
+    return {city_code, *wards, *old}
 
 
 def cmd_plateau(args) -> None:
