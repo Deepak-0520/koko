@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KOKO — Tokyo Risk Map</title>
+  <meta name="description" content="Click any place in Tokyo's 23 wards to see its flood, storm surge, landslide and earthquake risk, from official open data.">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">ここ</span>
+      <div>
+        <h1>KOKO</h1>
+        <p>Tokyo 23 wards · disaster risk for any address</p>
+      </div>
+    </div>
+    <form id="search" class="search" role="search">
+      <input id="q" type="search" placeholder="Address in Japanese, e.g. 江戸川区船堀 — or lat,lon"
+             aria-label="Search an address" autocomplete="off">
+      <button type="submit">Search</button>
+    </form>
+  </header>
+
+  <main class="layout">
+    <aside id="panel" class="panel" aria-live="polite">
+      <section class="intro">
+        <h2>Click anywhere on the map</h2>
+        <p>KOKO checks that exact spot against official Japanese hazard data and explains it in plain language.</p>
+        <ul class="steps">
+          <li><b>Flood</b>: how deep the water could get and how long it stays</li>
+          <li><b>Your building</b>: which floor stays dry (PLATEAU 3D city model)</li>
+          <li><b>Storm surge, landslide</b>: whether you are in a designated zone</li>
+          <li><b>Earthquake</b>: chance of strong shaking in the next 30 years</li>
+          <li><b>Shelters</b>: the nearest evacuation sites for each danger</li>
+        </ul>
+        <p class="hint">Try: <a href="#" data-goto="35.6835,139.8642">Edogawa Funabori</a> ·
+          <a href="#" data-goto="35.6950,139.7745">Kanda-Iwamotocho</a> ·
+          <a href="#" data-goto="35.6812,139.7671">Tokyo Station</a></p>
+      </section>
+    </aside>
+    <div id="map" class="map" aria-label="Map"></div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>

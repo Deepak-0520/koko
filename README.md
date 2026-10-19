@@ -2,7 +2,17 @@
 
 Address-level disaster risk for Japan, built on official open data. See [PLAN.md](PLAN.md) for the product plan.
 
-**Status:** Phase 0–1. The data pipeline and point-lookup API cover the Tokyo 23 wards. PLATEAU buildings are loaded for Chiyoda so far.
+**Status:** Phase 2. A Leaflet dashboard sits on top of the data pipeline and point-lookup API, which cover the Tokyo 23 wards. The hazard map layers themselves are nationwide.
+
+## Dashboard
+
+Open http://127.0.0.1:8000 after starting the API (see below).
+
+- **Map layers:** official flood depth, flood duration, storm surge and landslide tiles (ハザードマップポータル, all of Japan); ward boundaries, evacuation sites, and PLATEAU buildings coloured by their own flood depth (from our PostGIS)
+- **Click anywhere** for a report: risk level chips, worst-case flood, which floor of the building stays dry, 30-year earthquake probabilities, other hazards, and the nearest evacuation site for each danger present
+- **Search** a Japanese address (GSI address search) or type `lat,lon`
+
+Plain HTML + Leaflet 1.9.4 in `web/`, served by FastAPI. There is no build step.
 
 ## What a report contains
 
@@ -58,7 +68,8 @@ pipeline/koko_pipeline/   download → stage (GeoParquet in data/staged) → loa
   gsi.py                  GSI shelter tiles (skhb01–08), merged per site
   plateau.py              PLATEAU CityGML via HTTP range requests: only udx/bldg + codelists
   load.py                 COPY loader; sql/ has the schema and post-load indexes
-api/app/                  FastAPI: /health, /wards, /report
+api/app/                  FastAPI: /health, /wards, /report, /layers/{wards,shelters,buildings}
+web/                      Leaflet dashboard (index.html, app.js, style.css)
 tests/                    logic tests (pytest)
 ```
 
