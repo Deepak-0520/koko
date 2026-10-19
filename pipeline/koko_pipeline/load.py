@@ -162,4 +162,6 @@ def load_all(layers: list[str] | None = None, *, reset: bool = False, force: boo
                 log.info("  [%d/%d] %s %s: %d rows", i, len(todo), layer, path.stem, n)
             if todo:
                 conn.execute(f"ANALYZE {LAYERS[layer][0]}")
+                if layer == "municipalities":  # display boundaries and prefecture outlines for the explorer
+                    run_sql(conn, "003_areas.sql")
                 conn.commit()

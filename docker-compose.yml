@@ -2,6 +2,8 @@ services:
   db:
     image: postgis/postgis:17-3.5
     container_name: koko-db
+    # Docker's default 64 MB /dev/shm is too small for PostgreSQL's parallel queries on this data
+    shm_size: 1gb
     environment:
       POSTGRES_DB: koko
       POSTGRES_USER: koko

@@ -7,7 +7,7 @@
 const ORIGIN = location.origin;
 const GLOBE_VIEW = { center: [138, 30], zoom: 1.4 };
 const JAPAN_BOUNDS = [[122.9, 24.0], [146.2, 45.6]];  // main islands to Okinawa
-const BUILDINGS_MIN_ZOOM = 13;
+const BUILDINGS_MIN_ZOOM = 14;  // zoom-13 tiles in dense wards are ~1 MB
 
 // Official MLIT legend for flood depth (想定最大規模), so colours match the national hazard maps
 const DEPTH_CLASSES = [

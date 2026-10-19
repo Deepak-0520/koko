@@ -278,12 +278,16 @@ def tile(layer: str, z: int, x: int, y: int, muni: str = Query(..., pattern=r"^\
     with _pool.connection() as conn:
         row = conn.execute(f"""
             WITH env AS (SELECT ST_TileEnvelope(%(z)s, %(x)s, %(y)s) AS e3857,
-                                ST_Transform(ST_TileEnvelope(%(z)s, %(x)s, %(y)s), 4326) AS e4326)
+                                -- tile ∩ municipality bbox: a low-zoom tile spans millions of hazard
+                                -- polygons, the municipality only a few thousand
+                                ST_Intersection(ST_Transform(ST_TileEnvelope(%(z)s, %(x)s, %(y)s), 4326),
+                                                (SELECT ST_Envelope(geom_display) FROM koko.municipalities
+                                                 WHERE code = %(muni)s)) AS e4326)
             SELECT ST_AsMVT(q, %(layer)s, 4096, 'geom') FROM (
                 SELECT {cols},
                        ST_AsMVTGeom(ST_Transform(t.geom, 3857), env.e3857, 4096, 64, true) AS geom
                 FROM {table} t, env
-                WHERE t.geom && env.e4326 {extra}
+                WHERE NOT ST_IsEmpty(env.e4326) AND t.geom && env.e4326 {extra}
                   AND EXISTS (SELECT 1 FROM koko.municipality_parts mp
                               WHERE mp.code = %(muni)s AND mp.geom && env.e4326 AND ST_Intersects(mp.geom, t.geom))
             ) q WHERE q.geom IS NOT NULL""", {"z": z, "x": x, "y": y, "layer": layer, "muni": muni}).fetchone()
