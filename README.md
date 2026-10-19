@@ -10,6 +10,7 @@ See [PLAN.md](PLAN.md) for the product plan.
 
 - **Map dashboard** (Leaflet): official flood depth / duration, storm surge and landslide layers for all of Japan; municipality boundaries; evacuation sites; PLATEAU buildings coloured by their own flood depth
 - **Click-for-report** for any point: risk chips, worst-case flood depth and duration, house-collapse zones, **which floor of the building stays dry**, landslide / storm surge / tsunami zones, 30-year shaking probabilities, and the nearest evacuation site *rated for each hazard present*
+- **Fully bilingual (日本語 / English)**: every label, report, map layer, legend and error switches instantly with the header toggle, using official Japanese terms (洪水浸水想定区域, 土砂災害警戒区域, 震度6弱…); the choice is remembered
 - **Ask KOKO (AI)**: a Claude agent (`claude-opus-5-5`) with two tools, `search_address` (GSI) and `get_risk_report` (our PostGIS). It answers in the user's language, compares places, marks what it checked on the map, and must say when data is missing (*"no published data"* is not *"safe"*)
 
 ## How it works
@@ -74,7 +75,7 @@ pipeline/koko_pipeline/   catalog → download → stage (data/staged/<layer>/<s
   load.py                 incremental COPY loader; sql/ has the schema
 api/app/                  FastAPI: /report, /coverage, /layers/{areas,shelters,buildings}, /chat
   assistant.py            Ask KOKO: Claude tool-use loop, streamed as Server-Sent Events
-web/                      Leaflet dashboard (index.html, app.js, chat.js, style.css)
+web/                      Leaflet dashboard (index.html, app.js, chat.js, i18n.js = all EN/JA strings, style.css)
 tests/                    logic tests (pytest)
 ```
 

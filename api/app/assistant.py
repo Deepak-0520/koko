@@ -40,7 +40,8 @@ Never estimate or recall hazard figures from memory. If a tool says data is miss
 - Name the dataset behind each key fact briefly (for example: MLIT flood zones, PLATEAU, J-SHIS, GSI shelters).
 - You explain official hazard assumptions; you do not predict disasters. For a disaster happening now, \
 tell the user to follow JMA warnings and their municipality's evacuation orders, and not to wait for you.
-- Reply in the language the user writes in. Use plain words: explain Japanese terms (e.g. 浸水想定区域, \
+- Reply in the language the user writes in. If that is unclear (for example a bare address), use the \
+interface language given in their message. Use plain words: explain Japanese terms (e.g. 浸水想定区域, \
 震度6弱) the first time they appear. Keep answers short and practical: lead with the answer, then the \
 two or three facts behind it, then one concrete action.
 - When comparing places, call get_risk_report for each, then compare like for like.
@@ -131,17 +132,27 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-async def chat_stream(pool, history: list[dict], selection: dict | None) -> AsyncIterator[str]:
+def _error(code: str, message: str) -> str:
+    """Errors carry a code the browser translates; `message` is the English fallback for API clients."""
+    return _sse({"type": "error", "code": code, "message": message})
+
+
+LANG_NAMES = {"en": "English", "ja": "Japanese"}
+
+
+async def chat_stream(pool, history: list[dict], selection: dict | None, lang: str = "en") -> AsyncIterator[str]:
     """Stream one assistant turn. `history` is plain-text turns [{role, content}] from the browser."""
     if not is_configured():
-        yield _sse({"type": "error", "message": "Ask KOKO needs an Anthropic API key. Add ANTHROPIC_API_KEY "
-                                               "to the .env file in the project folder and restart the server."})
+        yield _error("no_key", "Ask KOKO needs an Anthropic API key. Add ANTHROPIC_API_KEY "
+                               "to the .env file in the project folder and restart the server.")
         return
 
     messages = [{"role": m["role"], "content": m["content"]} for m in history if m.get("content")]
-    if selection and messages and messages[-1]["role"] == "user":
-        ctx = f"[Map selection: lat {selection['lat']:.5f}, lon {selection['lon']:.5f}" + \
-              (f", {selection['label']}" if selection.get("label") else "") + "]\n"
+    if messages and messages[-1]["role"] == "user":
+        ctx = f"[Interface language: {LANG_NAMES.get(lang, 'English')}]\n"
+        if selection:
+            ctx += f"[Map selection: lat {selection['lat']:.5f}, lon {selection['lon']:.5f}" + \
+                   (f", {selection['label']}" if selection.get("label") else "") + "]\n"
         messages[-1] = {"role": "user", "content": ctx + messages[-1]["content"]}
 
     client = anthropic.AsyncAnthropic()
@@ -164,7 +175,7 @@ async def chat_stream(pool, history: list[dict], selection: dict | None) -> Asyn
                 response = await stream.get_final_message()
 
             if response.stop_reason == "refusal":
-                yield _sse({"type": "error", "message": "The assistant declined this request."})
+                yield _error("refusal", "The assistant declined this request.")
                 return
             if response.stop_reason == "pause_turn":
                 messages.append({"role": "assistant", "content": response.content})
@@ -173,7 +184,7 @@ async def chat_stream(pool, history: list[dict], selection: dict | None) -> Asyn
             if not tool_uses:
                 break
             if response.stop_reason == "max_tokens":
-                yield _sse({"type": "error", "message": "The answer was cut off. Please ask a shorter question."})
+                yield _error("cut_off", "The answer was cut off. Please ask a shorter question.")
                 return
 
             yield _sse({"type": "text", "text": "\n\n"})
@@ -186,18 +197,18 @@ async def chat_stream(pool, history: list[dict], selection: dict | None) -> Asyn
                 {"type": "tool_result", "tool_use_id": b.id, "content": text, "is_error": err}
                 for b, (text, err) in zip(tool_uses, results)]})
         else:
-            yield _sse({"type": "error", "message": "Stopped after too many lookups. Try a narrower question."})
+            yield _error("too_many", "Stopped after too many lookups. Try a narrower question.")
             return
         yield _sse({"type": "done"})
     except ValueError:
         # tool input JSON the SDK could not parse at all (eager input streaming)
-        yield _sse({"type": "error", "message": "The assistant produced an unreadable tool call. Please retry."})
+        yield _error("bad_tool", "The assistant produced an unreadable tool call. Please retry.")
     except anthropic.AuthenticationError:
-        yield _sse({"type": "error", "message": "The Anthropic API key was rejected. Check ANTHROPIC_API_KEY in .env."})
+        yield _error("auth", "The Anthropic API key was rejected. Check ANTHROPIC_API_KEY in .env.")
     except anthropic.RateLimitError:
-        yield _sse({"type": "error", "message": "Rate limited by the Anthropic API. Wait a minute and retry."})
+        yield _error("rate", "Rate limited by the Anthropic API. Wait a minute and retry.")
     except anthropic.APIStatusError as e:
         log.exception("Anthropic API error")
-        yield _sse({"type": "error", "message": f"Anthropic API error {e.status_code}."})
+        yield _error("api", f"Anthropic API error {e.status_code}.")
     except anthropic.APIConnectionError:
-        yield _sse({"type": "error", "message": "Could not reach the Anthropic API. Check the internet connection."})
+        yield _error("conn", "Could not reach the Anthropic API. Check the internet connection.")

@@ -1,4 +1,5 @@
-/* KOKO dashboard: Leaflet map + click-for-report panel. Talks to the FastAPI backend on the same origin. */
+/* KOKO dashboard: Leaflet map + click-for-report panel. Talks to the FastAPI backend on the same origin.
+   All visible text comes from i18n.js (t()), so the whole page switches between English and Japanese. */
 "use strict";
 
 const API = "";  // same origin as the FastAPI server
@@ -7,53 +8,49 @@ const BUILDINGS_MIN_ZOOM = 16;
 
 // Official MLIT legend for flood depth (想定最大規模), so our colours match the GSI hazard tiles
 const DEPTH_CLASSES = [
-  { max: 0.5, color: "#F7F5A9", label: "< 0.5 m" },
-  { max: 3, color: "#FFD8C0", label: "0.5 – 3 m" },
-  { max: 5, color: "#FFB7B7", label: "3 – 5 m" },
-  { max: 10, color: "#FF9191", label: "5 – 10 m" },
-  { max: 20, color: "#F285C9", label: "10 – 20 m" },
-  { max: Infinity, color: "#DC7ADC", label: "20 m +" },
+  { max: 0.5, color: "#F7F5A9", lo: 0, hi: 0.5 },
+  { max: 3, color: "#FFD8C0", lo: 0.5, hi: 3 },
+  { max: 5, color: "#FFB7B7", lo: 3, hi: 5 },
+  { max: 10, color: "#FF9191", lo: 5, hi: 10 },
+  { max: 20, color: "#F285C9", lo: 10, hi: 20 },
+  { max: Infinity, color: "#DC7ADC", lo: 20, hi: null },
 ];
-const HAZARD_NAMES = {
-  flood: "Flood", landslide: "Landslide", storm_surge: "Storm surge", earthquake: "Earthquake",
-  tsunami: "Tsunami", fire: "Large fire", inland_flood: "Inland flood", volcano: "Volcano",
-};
-const DATASET_NAMES = {
-  flood: "river flood", landslide: "landslide zones", tsunami: "tsunami", storm_surge: "storm surge", shelters: "evacuation sites",
-};
-const LEVEL_TEXT ={ none: "Not in zone", nodata: "No data here", low: "Low", mid: "Moderate", high: "High" };
+const HAZARDS = ["flood", "landslide", "storm_surge", "earthquake", "tsunami", "fire", "inland_flood", "volcano"];
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fmtM = (v) => (v == null ? "?" : `${+v.toFixed(2)} m`);
-const range = (r, unit) => (r.max == null ? `${r.min} ${unit} or more` : `${r.min} – ${r.max} ${unit}`);
+const locale = () => (LANG === "ja" ? "ja-JP" : "en-US");
+const num = (v) => (+v).toLocaleString(locale(), { maximumFractionDigits: 2 });
+const fmtM = (v) => (v == null ? "?" : `${num(v)} ${t("unit.m")}`);
+const range = (r, unit = t("unit.m")) => (r.max == null
+  ? t("range.orMore", { a: num(r.min), u: unit })
+  : t("range.between", { a: num(r.min), b: num(r.max), u: unit }));
 
 function hours(r) {
-  const h = (x) => (x >= 168 ? `${x / 168} wk` : x >= 24 ? `${x / 24} d` : `${x} h`);
-  return r.max == null ? `${h(r.min)} or more` : `${h(r.min)} – ${h(r.max)}`;
+  const h = (x) => (x >= 168 ? t("dur.w", { n: x / 168 }) : x >= 24 ? t("dur.d", { n: x / 24 }) : t("dur.h", { n: x }));
+  return r.max == null ? `${h(r.min)}+` : `${h(r.min)} – ${h(r.max)}`;
 }
 
 // ---------- map & layers ----------
 const map = L.map("map", { preferCanvas: true, zoomControl: true }).setView(JAPAN, 6);
 
 const gsiAttr = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>';
-const base = {
-  "GSI pale (淡色地図)": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", { maxNativeZoom: 18, maxZoom: 19, attribution: gsiAttr }),
-  "GSI standard (標準地図)": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", { maxNativeZoom: 18, maxZoom: 19, attribution: gsiAttr }),
-  "Aerial photo (写真)": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg", { maxNativeZoom: 18, maxZoom: 19, attribution: gsiAttr }),
-  "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }),
+const baseLayers = {
+  "map.base.pale": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", { maxNativeZoom: 18, maxZoom: 19, attribution: gsiAttr }),
+  "map.base.std": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", { maxNativeZoom: 18, maxZoom: 19, attribution: gsiAttr }),
+  "map.base.photo": L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg", { maxNativeZoom: 18, maxZoom: 19, attribution: gsiAttr }),
+  "map.base.osm": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }),
 };
-base["GSI pale (淡色地図)"].addTo(map);
+baseLayers["map.base.pale"].addTo(map);
 
 const hazAttr = '<a href="https://disaportal.gsi.go.jp/hazardmapportal/hazardmap/copyright/opendata.html" target="_blank">ハザードマップポータルサイト</a>';
 const hazardTile = (name, opacity = 0.65) =>
   L.tileLayer(`https://disaportaldata.gsi.go.jp/raster/${name}/{z}/{x}/{y}.png`, { opacity, maxNativeZoom: 17, maxZoom: 19, attribution: hazAttr });
 
-const floodDepth = hazardTile("01_flood_l2_shinsuishin_data").addTo(map);
-const overlays = {
-  "Flood depth — max assumed": floodDepth,
-  "Flood duration": hazardTile("01_flood_l2_keizoku_data"),
-  "Storm surge depth": hazardTile("03_hightide_l2_shinsuishin_data"),
-  "Landslide zones": L.layerGroup([
+const overlayLayers = {
+  "map.layer.floodDepth": hazardTile("01_flood_l2_shinsuishin_data").addTo(map),
+  "map.layer.floodDuration": hazardTile("01_flood_l2_keizoku_data"),
+  "map.layer.surge": hazardTile("03_hightide_l2_shinsuishin_data"),
+  "map.layer.landslide": L.layerGroup([
     hazardTile("05_kyukeishakeikaikuiki", 0.8), hazardTile("05_dosekiryukeikaikuiki", 0.8), hazardTile("05_jisuberikeikaikuiki", 0.8),
   ]),
 };
@@ -80,12 +77,15 @@ function viewLayer(layer, path, minZoom) {
   return refresh;
 }
 
-// Municipality boundaries (国土数値情報 N03)
+// Municipality boundaries (国土数値情報 N03). Tooltips are functions so they follow the current language.
 const areas = L.geoJSON(null, {
   style: { color: "#0b5cad", weight: 1.2, fill: false, opacity: 0.6 },
-  onEachFeature: (f, layer) => layer.bindTooltip(`${f.properties.pref_ja} ${f.properties.name_ja ?? ""}`, { sticky: true }),
+  onEachFeature: (f, layer) => layer.bindTooltip(() => {
+    const p = f.properties;
+    return LANG === "ja" ? `${esc(p.pref_ja)} ${esc(p.name_ja ?? "")}` : `${esc(p.name_ja ?? "")} · ${esc(p.pref_en)}`;
+  }, { sticky: true }),
 });
-overlays["Municipality boundaries"] = areas;
+overlayLayers["map.layer.areas"] = areas;
 areas.addTo(map);
 const refreshAreas = viewLayer(areas, "/layers/areas", 9);
 
@@ -94,9 +94,9 @@ const shelters = L.geoJSON(null, {
   pointToLayer: (f, ll) => L.circleMarker(ll, {
     radius: 4, weight: 1.5, color: "#ffffff", fillColor: f.properties.flood ? "#0b5cad" : "#5b6670", fillOpacity: 0.95,
   }),
-  onEachFeature: (f, layer) => layer.bindPopup(shelterPopup(f.properties)),
+  onEachFeature: (f, layer) => layer.bindPopup(() => shelterPopup(f.properties)),
 });
-overlays["Evacuation sites (zoom in)"] = shelters;
+overlayLayers["map.layer.shelters"] = shelters;
 shelters.addTo(map);
 const refreshShelters = viewLayer(shelters, "/layers/shelters", 12);
 
@@ -104,70 +104,89 @@ const refreshShelters = viewLayer(shelters, "/layers/shelters", 12);
 const buildings = L.geoJSON(null, {
   style: (f) => {
     const d = f.properties.flood_depth_m;
-    return {
-      weight: 0.6, color: "#555", fillOpacity: 0.85,
-      fillColor: d == null || d <= 0 ? "#e9ecef" : depthClass(d).color,
-    };
+    return { weight: 0.6, color: "#555", fillOpacity: 0.85, fillColor: d == null || d <= 0 ? "#e9ecef" : depthClass(d).color };
   },
-  onEachFeature: (f, layer) => {
+  onEachFeature: (f, layer) => layer.bindTooltip(() => {
     const p = f.properties;
-    layer.bindTooltip(`${esc(p.usage || "Building")} · ${p.storeys ?? "?"} floors<br>Flood depth here: ${p.flood_depth_m == null ? "none" : fmtM(p.flood_depth_m)}`, { sticky: true });
-  },
+    return t("map.building.tip", {
+      usage: esc(p.usage ? usageLabel(p.usage) : t("map.building")),
+      floors: p.storeys ?? "?",
+      depth: p.flood_depth_m == null ? t("bldg.none") : fmtM(p.flood_depth_m),
+    });
+  }, { sticky: true }),
 });
-overlays["PLATEAU buildings (zoom in)"] = buildings;
+overlayLayers["map.layer.buildings"] = buildings;
 buildings.addTo(map);
 const refreshBuildings = viewLayer(buildings, "/layers/buildings", BUILDINGS_MIN_ZOOM);
 map.whenReady(() => { refreshAreas(); refreshShelters(); refreshBuildings(); });
 
-L.control.layers(base, overlays, { collapsed: window.innerWidth < 820 }).addTo(map);
 L.control.scale({ imperial: false }).addTo(map);
 
-// Legend
+// Layer switcher and legend are rebuilt when the language changes
+let layerControl = null;
 const legend = L.control({ position: "bottomright" });
 legend.onAdd = () => {
   const div = L.DomUtil.create("div", "legend");
-  div.innerHTML = "<b>Flood depth (max assumed)</b>" +
-    DEPTH_CLASSES.map((c) => `<div><i style="background:${c.color}"></i>${c.label}</div>`).join("") +
-    `<div class="note">Buildings: zoom in to ${BUILDINGS_MIN_ZOOM}+</div>`;
+  div.innerHTML = `<b>${t("map.legend.title")}</b>` +
+    DEPTH_CLASSES.map((c) => `<div><i style="background:${c.color}"></i>${c.lo === 0 ? `&lt; ${num(c.hi)} ${t("unit.m")}` : range({ min: c.lo, max: c.hi })}</div>`).join("") +
+    `<div class="note">${t("map.legend.buildings", { z: BUILDINGS_MIN_ZOOM })}</div>`;
   return div;
 };
-legend.addTo(map);
+
+function buildMapControls() {
+  if (layerControl) layerControl.remove();
+  const named = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [t(k), v]));
+  layerControl = L.control.layers(named(baseLayers), named(overlayLayers), { collapsed: window.innerWidth < 820 }).addTo(map);
+  legend.remove();
+  legend.addTo(map);
+}
+buildMapControls();
 
 function depthClass(d) { return DEPTH_CLASSES.find((c) => d < c.max); }
 
 // ---------- report ----------
 const panel = document.getElementById("panel");
 let pin = null;
-let selection = null;  // last place picked on the map; Ask KOKO uses it for "this place"
+let selection = null;   // last place picked on the map; Ask KOKO uses it for "this place"
+let lastReport = null;  // { rep, addr } so a language switch can re-render without refetching
 
 map.on("click", (e) => runReport(e.latlng.lat, e.latlng.lng));
+
+class ReportError extends Error {}
 
 async function runReport(lat, lon, label) {
   if (pin) pin.setLatLng([lat, lon]); else pin = L.marker([lat, lon]).addTo(map);
   selection = { lat, lon, label: label || null };
-  panel.innerHTML = `<div class="loading">Checking ${lat.toFixed(5)}, ${lon.toFixed(5)}…</div>`;
+  lastReport = null;
+  panel.innerHTML = `<div class="loading">${t("report.checking", { lat: lat.toFixed(5), lon: lon.toFixed(5) })}</div>`;
   try {
     const [rep, addr] = await Promise.all([
       fetch(`${API}/report?lat=${lat}&lon=${lon}`).then(async (r) => {
-        if (r.status === 422) throw new Error((await r.json()).detail);
-        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        if (r.status === 422) throw new ReportError("report.outside");
+        if (!r.ok) throw new Error(t("report.serverError", { status: r.status }));
         return r.json();
       }),
       label ? Promise.resolve(label) : reverseGeocode(lat, lon),
     ]);
     const a = rep.location.area;
     selection.label = addr && addr.startsWith(a.pref_ja) ? addr : `${a.pref_ja}${a.name_ja ?? ""}${addr ? ` ${addr}` : ""}`;
-    panel.innerHTML = renderReport(rep, addr);
-    panel.scrollTop = 0;
-    panel.querySelectorAll("[data-shelter]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const [la, lo] = btn.dataset.shelter.split(",").map(Number);
-        map.flyTo([la, lo], 17);
-        L.popup().setLatLng([la, lo]).setContent(esc(btn.textContent)).openOn(map);
-      }));
+    lastReport = { rep, addr };
+    showReport();
   } catch (err) {
-    panel.innerHTML = `<div class="error">${esc(err.message)}</div>`;
+    panel.innerHTML = `<div class="error">${esc(err instanceof ReportError ? t(err.message) : err.message)}</div>`;
   }
+}
+
+function showReport() {
+  const { rep, addr } = lastReport;
+  panel.innerHTML = renderReport(rep, addr);
+  panel.scrollTop = 0;
+  panel.querySelectorAll("[data-shelter]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const [la, lo] = btn.dataset.shelter.split(",").map(Number);
+      map.flyTo([la, lo], 17);
+      L.popup().setLatLng([la, lo]).setContent(esc(btn.textContent)).openOn(map);
+    }));
 }
 
 async function reverseGeocode(lat, lon) {
@@ -193,148 +212,160 @@ function levels(rep) {
   return { flood, surge, slide, quake };
 }
 
-function chip(name, lv, text) {
+function chip(nameKey, lv, text) {
   return `<div class="chip lv-${lv}"><span class="dot" aria-hidden="true"></span>
-    <div><b>${name}</b><span class="level">${text ?? LEVEL_TEXT[lv]}</span></div></div>`;
+    <div><b>${t(nameKey)}</b><span class="level">${text ?? t(`level.${lv}`)}</span></div></div>`;
 }
 
 function renderReport(rep, addr) {
   const a = rep.location.area;
   const lv = levels(rep);
   const p6 = rep.earthquake?.probability_30y?.["6-"];
-  const title = `${a.pref_ja} ${a.name_ja ?? ""}${addr && !addr.startsWith(a.pref_ja) ? ` ${addr}` : ""}`;
-  let html = `<div class="place"><h2>${esc(addr && addr.startsWith(a.pref_ja) ? addr : title)}</h2>
-    <p>${esc(a.pref_en)} · ${rep.location.lat.toFixed(5)}, ${rep.location.lon.toFixed(5)}</p></div>`;
+  const place = addr && addr.startsWith(a.pref_ja) ? addr : `${a.pref_ja} ${a.name_ja ?? ""}${addr ? ` ${addr}` : ""}`;
+  const sub = LANG === "ja" ? a.pref_ja : a.pref_en;
+  let html = `<div class="place"><h2>${esc(place)}</h2>
+    <p>${esc(sub)} · ${rep.location.lat.toFixed(5)}, ${rep.location.lon.toFixed(5)}</p></div>`;
 
   html += `<div class="chips">
-    ${chip("Flood", lv.flood)}
-    ${chip("Storm surge", lv.surge)}
-    ${chip("Landslide", lv.slide)}
-    ${lv.quake ? chip("Earthquake (6-lower)", lv.quake, `${LEVEL_TEXT[lv.quake]} · ${p6 < 0.01 ? "<1" : Math.round(p6 * 100)}%`) : chip("Earthquake", "none", "Unavailable")}
+    ${chip("chip.flood", lv.flood)}
+    ${chip("chip.surge", lv.surge)}
+    ${chip("chip.landslide", lv.slide)}
+    ${lv.quake ? chip("chip.quake", lv.quake, `${t(`level.${lv.quake}`)} · ${p6 < 0.01 ? "<1" : Math.round(p6 * 100)}%`)
+      : chip("chip.quakeShort", "none", t("level.unavailable"))}
   </div>`;
 
-  const missing = Object.entries(rep.data_available).filter(([, ok]) => !ok).map(([k]) => DATASET_NAMES[k]);
+  const prefName = LANG === "ja" ? a.pref_ja : a.pref_en;
+  const missing = Object.entries(rep.data_available).filter(([, ok]) => !ok).map(([k]) => t(`dataset.${k}`));
   if (missing.length === Object.keys(rep.data_available).length) {
-    html += `<div class="card notice"><h3>⏳ ${esc(a.pref_en)} is still being loaded</h3>
-      <p>KOKO is downloading official hazard data for all of Japan, and ${esc(a.pref_ja)} isn't in the database yet.
-      The earthquake data below is live. Meanwhile the coloured flood layer on the map already covers this area.</p></div>`;
+    html += `<div class="card notice"><h3>⏳ ${esc(t("notice.loadingTitle", { pref: prefName }))}</h3>
+      <p>${esc(t("notice.loadingBody", { pref: prefName }))}</p></div>`;
   } else if (missing.length) {
-    html += `<div class="card notice"><p><b>Not loaded here yet:</b> ${esc(missing.join(", "))}.
-      Results for these show as “No data here”, which is not the same as safe.</p></div>`;
+    html += `<div class="card notice"><p>${t("notice.partial", { list: esc(missing.join(t("list.sep"))) })}</p></div>`;
   }
   html += floodCard(rep);
   html += buildingCard(rep);
   html += quakeCard(rep.earthquake);
   html += otherCard(rep);
   html += shelterCard(rep.shelters);
-  html += `<p class="disclaimer">${esc(rep.disclaimer)}</p>`;
+  html += `<p class="disclaimer">${t("disclaimer")}</p>`;
   return html;
 }
 
 function floodCard(rep) {
   const f = rep.flood;
   if (!f.in_zone && !rep.data_available.flood) {
-    return `<div class="card"><h3>🌊 River flood</h3>
-      <p>Flood data for this area is not loaded yet. Check the flood layer on the map, or the municipal hazard map.</p></div>`;
+    return `<div class="card"><h3>🌊 ${t("flood.title")}</h3><p>${t("flood.notLoaded")}</p></div>`;
   }
   if (!f.in_zone) {
-    return `<div class="card"><h3>🌊 River flood</h3>
-      <p>Not inside a designated river-flood zone.</p>
-      <p class="src">Not being in a zone is not zero risk: heavy rain can still flood streets (内水氾濫).</p></div>`;
+    return `<div class="card"><h3>🌊 ${t("flood.title")}</h3>
+      <p>${t("flood.notInZone")}</p><p class="src">${t("flood.notZeroRisk")}</p></div>`;
   }
   const collapse = f.house_collapse_zone.flood_flow || f.house_collapse_zone.bank_erosion;
-  return `<div class="card"><h3>🌊 River flood — worst-case scenario</h3>
-    <div class="big">${range(f.max_assumed, "m")} deep</div>
+  return `<div class="card"><h3>🌊 ${t("flood.titleZone")}</h3>
+    <div class="big">${t("flood.deep", { range: range(f.max_assumed) })}</div>
     <dl>
-      <dt>Water may stay</dt><dd>${f.duration ? hours(f.duration) : "not mapped"}</dd>
-      <dt>Planned-scale flood</dt><dd>${f.planned_scale ? range(f.planned_scale, "m") : "not in zone"}</dd>
-      <dt>House-collapse zone</dt><dd>${collapse ? "<b>Yes</b>: buildings may be swept away or undermined" : "No"}</dd>
+      <dt>${t("flood.stay")}</dt><dd>${f.duration ? hours(f.duration) : t("flood.notMapped")}</dd>
+      <dt>${t("flood.planned")}</dt><dd>${f.planned_scale ? range(f.planned_scale) : t("flood.notInZoneShort")}</dd>
+      <dt>${t("flood.collapse")}</dt><dd>${collapse ? t("flood.collapseYes") : t("flood.no")}</dd>
     </dl>
-    <p class="src">Source: 国土数値情報 洪水浸水想定区域 (A31b, 2025)</p></div>`;
+    <p class="src">${t("flood.source")}</p></div>`;
+}
+
+/* The verdict text is built here from the structured fields, so it follows the UI language. */
+function verdictReason(v) {
+  if (v.verdict === "leave_building" && v.house_collapse_zone) return t("bldg.r.collapse");
+  if (v.verdict === "unknown") return t("bldg.r.noStoreys");
+  if (v.verdict === "leave_building") return t("bldg.r.noFloor");
+  let s = t("bldg.r.upper", { floor: v.lowest_safe_floor });
+  if (v.isolation_24h_or_more) s += ` ${t("bldg.r.isolation")}`;
+  return s;
 }
 
 function buildingCard(rep) {
   const b = rep.building, v = rep.vertical_evacuation;
   if (!b && !v) return "";
-  let html = `<div class="card"><h3>🏢 This building</h3>`;
+  let html = `<div class="card"><h3>🏢 ${t("bldg.title")}</h3>`;
   if (b) {
     html += `<dl>
-      <dt>Use</dt><dd>${esc(b.usage_label || "unknown")}</dd>
-      <dt>Floors</dt><dd>${b.storeys_above ?? "?"} above ground${b.storeys_below ? `, ${b.storeys_below} below` : ""}</dd>
-      <dt>Height</dt><dd>${b.height_m == null ? "?" : fmtM(b.height_m)}</dd>
-      <dt>PLATEAU flood depth</dt><dd>${b.flood_max_depth_m == null ? "none" : fmtM(b.flood_max_depth_m)}</dd>
+      <dt>${t("bldg.use")}</dt><dd>${esc(usageLabel(b.usage_label))}</dd>
+      <dt>${t("bldg.floors")}</dt><dd>${t("bldg.floorsValue", { above: b.storeys_above ?? "?" })}${b.storeys_below ? t("bldg.floorsBelow", { below: b.storeys_below }) : ""}</dd>
+      <dt>${t("bldg.height")}</dt><dd>${fmtM(b.height_m)}</dd>
+      <dt>${t("bldg.plateauDepth")}</dt><dd>${b.flood_max_depth_m == null ? t("bldg.none") : fmtM(b.flood_max_depth_m)}</dd>
     </dl>`;
   } else {
-    html += `<p>No PLATEAU building data at this point yet.</p>`;
+    html += `<p>${t("bldg.noData")}</p>`;
   }
   if (v) {
     const cls = v.verdict === "leave_building" ? "high" : v.verdict === "unknown" ? "none" : v.isolation_24h_or_more ? "mid" : "low";
     const title = {
-      leave_building: "Leave this building before the flood",
-      upper_floors_ok: `Floor ${v.lowest_safe_floor} and above should stay dry`,
-      minor: "Water is not expected above the ground floor",
-      unknown: "Can't judge which floor is safe",
+      leave_building: t("bldg.v.leave"),
+      upper_floors_ok: t("bldg.v.upper", { floor: v.lowest_safe_floor }),
+      minor: t("bldg.v.minor"),
+      unknown: t("bldg.v.unknown"),
     }[v.verdict];
-    html += `<div class="verdict lv-${cls}" style="margin-top:10px"><strong>${title}</strong>${esc(v.reason)}</div>`;
-    html += `<p class="src">Assumes ${fmtM(v.expected_depth_m)} of water (${v.depth_basis === "plateau_building" ? "PLATEAU building value" : "cautious upper bound of the flood zone"})${v.storey_height_m ? `, about ${v.storey_height_m} m per floor, plus a ${v.safety_margin_m} m margin` : ""}.</p>`;
+    html += `<div class="verdict lv-${cls}" style="margin-top:10px"><strong>${title}</strong>${esc(verdictReason(v))}</div>`;
+    const basis = t(v.depth_basis === "plateau_building" ? "bldg.basis.plateau" : "bldg.basis.zone");
+    html += `<p class="src">${t("bldg.assumes", { depth: fmtM(v.expected_depth_m), basis })}${v.storey_height_m
+      ? t("bldg.assumesFloors", { h: num(v.storey_height_m), m: num(v.safety_margin_m) }) : ""}${t("punct.end")}</p>`;
   }
-  return html + `<p class="src">Source: Project PLATEAU 3D city model (CityGML 2025)</p></div>`;
+  return html + `<p class="src">${t("bldg.source")}</p></div>`;
 }
 
 function quakeCard(eq) {
   if (!eq || eq.error || !eq.probability_30y) {
-    return `<div class="card"><h3>🫨 Earthquake</h3><p>J-SHIS is unavailable right now.</p></div>`;
+    return `<div class="card"><h3>🫨 ${t("quake.title")}</h3><p>${t("quake.unavailable")}</p></div>`;
   }
-  const names = { "5-": "Shindo 5-", "5+": "Shindo 5+", "6-": "Shindo 6-", "6+": "Shindo 6+" };
   const bars = Object.entries(eq.probability_30y).map(([k, p]) =>
-    `<div class="bar"><span class="lab">${names[k]}</span>
+    `<div class="bar"><span class="lab">${t(`quake.i.${k}`)}</span>
       <span class="track"><span class="fill" style="width:${(p * 100).toFixed(1)}%"></span></span>
       <span class="val">${(p * 100).toFixed(p < 0.1 ? 1 : 0)}%</span></div>`).join("");
-  return `<div class="card"><h3>🫨 Chance of strong shaking in the next 30 years</h3>
+  return `<div class="card"><h3>🫨 ${t("quake.title30")}</h3>
     <div class="bars" role="list">${bars}</div>
-    <p>At Shindo 6-lower, unsecured furniture falls and older wooden houses can be damaged.</p>
-    <p class="src">Source: J-SHIS (NIED) probabilistic seismic hazard map, Y2024, 250 m mesh ${esc(eq.meshcode)}</p></div>`;
+    <p>${t("quake.explain")}</p>
+    <p class="src">${t("quake.source", { mesh: esc(eq.meshcode) })}</p></div>`;
+}
+
+function depthZone(z) {
+  return z.min != null ? range({ min: z.min, max: z.max }) : esc(z.depth_label);
 }
 
 function otherCard(rep) {
   const ss = rep.storm_surge, ts = rep.tsunami, has = rep.data_available;
-  const notIn = (key) => (has[key] ? "Not in a designated zone" : "No published data for this prefecture");
+  const notIn = (key) => t(has[key] ? "other.notInZone" : "other.noData");
   const slides = rep.landslide;
   const slideText = slides.length
-    ? slides.map((z) => `${z.zone?.startsWith("special") ? "<b>Special warning zone (red)</b>" : "Warning zone (yellow)"}: ${esc(z.phenomenon?.replaceAll("_", " "))}${z.name ? ` · ${esc(z.name)}` : ""}`).join("<br>")
+    ? slides.map((z) => `${t(`slide.zone.${z.zone}`)}${t("punct.colon")}${t(`slide.ph.${z.phenomenon}`)}${z.name ? ` · ${esc(z.name)}` : ""}`).join("<br>")
     : notIn("landslide");
-  return `<div class="card"><h3>⚠️ Other hazards</h3><dl>
-    <dt>Storm surge</dt><dd>${ss.in_zone ? `${esc(ss.depth_label)} (typhoon worst case)` : notIn("storm_surge")}</dd>
-    <dt>Landslide</dt><dd>${slideText}</dd>
-    <dt>Tsunami</dt><dd>${ts.in_zone ? esc(ts.depth_label) : notIn("tsunami")}</dd>
+  return `<div class="card"><h3>⚠️ ${t("other.title")}</h3><dl>
+    <dt>${t("other.surge")}</dt><dd>${ss.in_zone ? t("other.typhoon", { range: depthZone(ss) }) : notIn("storm_surge")}</dd>
+    <dt>${t("other.landslide")}</dt><dd>${slideText}</dd>
+    <dt>${t("other.tsunami")}</dt><dd>${ts.in_zone ? depthZone(ts) : notIn("tsunami")}</dd>
   </dl>
-  <p class="src">Sources: 国土数値情報 A49 storm surge, A33 landslide (2025), A40 tsunami (newest edition per prefecture)</p></div>`;
+  <p class="src">${t("other.source")}</p></div>`;
 }
 
 function shelterCard(s) {
-  const tags = (list) => `<div class="tags">${Object.keys(HAZARD_NAMES).map((h) =>
-    list.includes(h) ? `<span class="tag on">${HAZARD_NAMES[h]}</span>` : "").join("")}</div>`;
+  const tags = (list) => `<div class="tags">${HAZARDS.map((h) =>
+    list.includes(h) ? `<span class="tag on">${t(`hazard.${h}`)}</span>` : "").join("")}</div>`;
   const item = (x, prefix = "") => `<li>${prefix}<button data-shelter="${x.lat},${x.lon}">${esc(x.name)}</button>
-    · ${x.distance_m.toLocaleString()} m<br><span class="src">${esc(x.address || "")}</span>
+    · ${x.distance_m.toLocaleString(locale())} m<br><span class="src">${esc(x.address || "")}</span>
     ${x.remarks ? `<br><span class="src">${esc(x.remarks)}</span>` : ""}${tags(x.for)}</li>`;
 
-  let html = `<div class="card"><h3>🏫 Evacuation sites</h3>`;
+  let html = `<div class="card"><h3>🏫 ${t("shelter.title")}</h3>`;
   const per = Object.entries(s.nearest_for_hazard).filter(([, x]) => x);
   if (per.length) {
-    html += `<p>Nearest site rated for each danger here:</p><ul class="shelters">` +
-      per.map(([h, x]) => item(x, `<b>${HAZARD_NAMES[h]}:</b> `)).join("") + `</ul>`;
+    html += `<p>${t("shelter.perHazard")}</p><ul class="shelters">` +
+      per.map(([h, x]) => item(x, `<b>${t(`hazard.${h}`)}${t("punct.colon")}</b>`)).join("") + `</ul>`;
   }
-  if (!s.nearest.length) {
-    return html + `<p>No evacuation sites within 25 km in KOKO's data yet. Check your city's hazard map for the designated sites.</p></div>`;
-  }
-  html += `<p style="margin-top:10px">All nearby sites:</p><ul class="shelters">${s.nearest.map((x) => item(x)).join("")}</ul>
-    <p class="src">Straight-line distance. Source: 国土地理院 指定緊急避難場所データ</p></div>`;
+  if (!s.nearest.length) return html + `<p>${t("shelter.none")}</p></div>`;
+  html += `<p style="margin-top:10px">${t("shelter.all")}</p><ul class="shelters">${s.nearest.map((x) => item(x)).join("")}</ul>
+    <p class="src">${t("shelter.source")}</p></div>`;
   return html;
 }
 
 function shelterPopup(p) {
-  const types = Object.keys(HAZARD_NAMES).filter((h) => p[h]).map((h) => HAZARD_NAMES[h]).join(", ");
-  return `<b>${esc(p.name)}</b><br>${esc(p.address || "")}<br><span style="color:#4a525c">For: ${esc(types || "—")}</span>` +
+  const types = HAZARDS.filter((h) => p[h]).map((h) => t(`hazard.${h}`)).join(t("list.sep"));
+  return `<b>${esc(p.name)}</b><br>${esc(p.address || "")}<br><span style="color:#4a525c">${t("map.shelter.for")}${t("punct.colon")}${esc(types || "—")}</span>` +
     (p.remarks ? `<br><small>${esc(p.remarks)}</small>` : "");
 }
 
@@ -345,11 +376,11 @@ document.getElementById("search").addEventListener("submit", async (e) => {
   if (!q) return;
   const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
   if (m) return go(+m[1], +m[2]);
-  panel.innerHTML = `<div class="loading">Searching “${esc(q)}”…</div>`;
+  panel.innerHTML = `<div class="loading">${esc(t("search.searching", { q }))}</div>`;
   try {
     const r = await fetch(`https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`);
     const hits = await r.json();
-    if (!hits.length) throw new Error("Address not found. Try Japanese, e.g. 千代田区丸の内1丁目");
+    if (!hits.length) throw new Error(t("search.notFound"));
     const [lon, lat] = hits[0].geometry.coordinates;
     go(lat, lon, hits[0].properties.title);
   } catch (err) {
@@ -367,3 +398,10 @@ document.querySelectorAll("[data-goto]").forEach((a) => a.addEventListener("clic
   const [lat, lon] = a.dataset.goto.split(",").map(Number);
   go(lat, lon);
 }));
+
+// ---------- language switch ----------
+document.addEventListener("langchange", () => {
+  buildMapControls();
+  if (lastReport) showReport();
+  map.closePopup();
+});

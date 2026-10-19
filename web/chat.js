@@ -23,7 +23,7 @@ tabs.chat.addEventListener("click", () => showTab("chat"));
 
 fetch("/chat/status").then((r) => r.json()).then((s) => {
   if (!s.configured) {
-    addBubble("bot error", "Ask KOKO is not set up yet: add ANTHROPIC_API_KEY to the .env file and restart the server.");
+    addBubble("bot error", t("chat.err.no_key"));
   }
 }).catch(() => {});
 
@@ -41,12 +41,12 @@ function addToolNote(name, input) {
   const div = document.createElement("div");
   div.className = "tool-note";
   if (name === "search_address") {
-    div.innerHTML = `🔎 Searching address <b>${esc(input?.query)}</b>`;
+    div.innerHTML = t("chat.tool.search", { q: esc(input?.query) });
   } else if (name === "get_risk_report") {
-    div.innerHTML = `📊 Checking official hazard data at <b>${(+input?.lat).toFixed(4)}, ${(+input?.lon).toFixed(4)}</b>`;
+    div.innerHTML = t("chat.tool.report", { lat: (+input?.lat).toFixed(4), lon: (+input?.lon).toFixed(4) });
     if (Number.isFinite(+input?.lat) && Number.isFinite(+input?.lon)) {
       L.circleMarker([+input.lat, +input.lon], { radius: 8, color: "#7c3aed", weight: 3, fillOpacity: 0.15 })
-        .bindTooltip("Checked by Ask KOKO").addTo(lookedUp);
+        .bindTooltip(() => t("map.checkedByAi")).addTo(lookedUp);
     }
   } else {
     div.textContent = `⚙️ ${name}`;
@@ -88,9 +88,9 @@ async function send(question) {
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chatHistory, selection }),
+      body: JSON.stringify({ messages: chatHistory, selection, lang: LANG }),
     });
-    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    if (!res.ok) throw new Error(t("report.serverError", { status: res.status }));
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
@@ -115,13 +115,13 @@ async function send(question) {
           bubble = addBubble("bot typing", "");
           text = "";
         } else if (ev.type === "error") {
-          addBubble("bot error", ev.message);
+          addBubble("bot error", ev.code ? t(`chat.err.${ev.code}`) : ev.message);
         }
         chatLog.scrollTop = chatLog.scrollHeight;
       }
     }
   } catch (err) {
-    addBubble("bot error", `Could not reach Ask KOKO: ${err.message}`);
+    addBubble("bot error", t("chat.unreachable", { msg: err.message }));
   } finally {
     bubble.classList.remove("typing");
     if (!text.trim()) bubble.remove();

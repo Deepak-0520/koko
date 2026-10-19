@@ -12,6 +12,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")  # before reading DATABASE_URL / ANTHROPIC_API_KEY
@@ -101,8 +103,8 @@ def layer_shelters(bbox: str = Query(..., description="west,south,east,north"), 
 
 
 @app.get("/layers/buildings")
-def layer_buildings(bbox: str = Query(..., description="west,south,east,north"), limit: int = Query(4000, le=8000)):
-    p = _bbox(bbox, 0.0004)  # roughly 2 km x 2 km; zoom in for building footprints
+def layer_buildings(bbox: str = Query(..., description="west,south,east,north"), limit: int = Query(8000, le=15000)):
+    p = _bbox(bbox, 0.003)  # about 5 km x 6 km: a wide screen at zoom 16; zoom in for building footprints
     w, s, e, n = p["w"], p["s"], p["e"], p["n"]
     with pool.connection() as conn, conn.cursor() as cur:
         return _feature_collection(cur, """
@@ -138,6 +140,7 @@ class Selection(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatTurn] = Field(min_length=1, max_length=40)
     selection: Selection | None = None
+    lang: Literal["en", "ja"] = "en"
 
 
 @app.get("/chat/status")
@@ -151,7 +154,7 @@ async def chat(req: ChatRequest):
     if req.messages[-1].role != "user":
         raise HTTPException(status_code=422, detail="last message must be from the user")
     events = assistant.chat_stream(pool, [m.model_dump() for m in req.messages],
-                                   req.selection.model_dump() if req.selection else None)
+                                   req.selection.model_dump() if req.selection else None, req.lang)
     return StreamingResponse(events, media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
