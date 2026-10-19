@@ -16,6 +16,9 @@ from .download import fetch, find_members, vsizip
 log = logging.getLogger(__name__)
 CRS = "EPSG:4326"
 
+# Some flood polygons (e.g. mesh 5236, Nagoya area) exceed GDAL's default 200 MB per-object GeoJSON limit
+pyogrio.set_gdal_config_options({"OGR_GEOJSON_MAX_OBJ_SIZE": "0"})
+
 
 def _read_member(zip_path: Path, raw: str, name: str) -> gpd.GeoDataFrame:
     kw = {"use_arrow": True}
