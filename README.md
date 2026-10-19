@@ -81,7 +81,7 @@ tests/                    logic tests (pytest)
 
 ## Data notes
 
-- **Coverage varies by dataset:** landslide zones cover all 47 prefectures (2025); tsunami covers 39 coastal prefectures and storm surge 15, each in the newest edition published (2016–2024). PLATEAU buildings cover the Tokyo 23 wards and the major cities staged.
+- **Coverage varies by dataset:** landslide zones cover all 47 prefectures (2025); tsunami covers 39 coastal prefectures and storm surge 15, each in the newest edition published (2016–2024). PLATEAU buildings cover every city PLATEAU publishes (306 cities in 45 prefectures with `--cities all`); elsewhere the report falls back to zone-level flood depth.
 - **PLATEAU sentinels:** 9999 / -9999 (unknown storeys or height) are stored as NULL.
 - **Licences:** 国土数値情報, PLATEAU, GSI, and J-SHIS each have attribution terms. Check them before any commercial use.
 - Shelter distances are straight-line; walking routes are a later phase.

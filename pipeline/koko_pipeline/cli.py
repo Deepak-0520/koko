@@ -4,6 +4,7 @@
     python -m koko_pipeline stage --prefs all            # all 47 prefectures
     python -m koko_pipeline stage --prefs 27 --only landslide shelters
     python -m koko_pipeline plateau --cities major       # Tokyo 23 wards + major cities
+    python -m koko_pipeline plateau --cities all         # every PLATEAU city (~300; 1-2 days)
     python -m koko_pipeline plateau --cities 27100 14100
     python -m koko_pipeline load                         # staged files -> PostGIS (incremental)
     python -m koko_pipeline load --reset                 # drop and rebuild the koko schema first
@@ -133,7 +134,10 @@ def _own_codes(city_code: str) -> set[str]:
 
 
 def cmd_plateau(args) -> None:
-    if args.cities == ["major"]:
+    if args.cities == ["all"]:
+        major = config.TOKYO_23 + list(config.MAJOR_CITIES)
+        codes = major + [c for c in plateau.all_city_codes() if c not in major]
+    elif args.cities == ["major"]:
         codes = config.TOKYO_23 + list(config.MAJOR_CITIES)
     elif args.cities == ["tokyo23"]:
         codes = config.TOKYO_23
@@ -171,7 +175,7 @@ def main(argv=None) -> None:
     s.set_defaults(func=cmd_stage)
 
     s = sub.add_parser("plateau", help="stage PLATEAU buildings per city")
-    s.add_argument("--cities", nargs="+", default=["tokyo23"], help="city codes, 'tokyo23' or 'major'")
+    s.add_argument("--cities", nargs="+", default=["tokyo23"], help="city codes, 'tokyo23', 'major' or 'all' (every PLATEAU city)")
     s.add_argument("--force", action="store_true")
     s.set_defaults(func=cmd_plateau)
 

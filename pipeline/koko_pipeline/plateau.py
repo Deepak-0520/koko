@@ -34,6 +34,16 @@ def _catalog() -> list[dict]:
     return requests.get(config.DATASETS["buildings"]["url"], timeout=120).json()["citygml"]
 
 
+def all_city_codes() -> list[str]:
+    """Every city with PLATEAU building data, smallest download first (quick wins before the huge ones)."""
+    latest: dict[str, dict] = {}
+    for r in _catalog():
+        if "bldg" in (r.get("feature_types") or []):
+            if r["city_code"] not in latest or r["year"] > latest[r["city_code"]]["year"]:
+                latest[r["city_code"]] = r
+    return [c for c, _ in sorted(latest.items(), key=lambda kv: kv[1]["file_size"])]
+
+
 def catalog_entry(city_code: str) -> dict:
     """Latest CityGML entry for a city (or Tokyo ward) from the PLATEAU data catalog."""
     rows = [r for r in _catalog() if r["city_code"] == city_code]
