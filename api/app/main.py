@@ -18,11 +18,13 @@ from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")  # before reading DATABASE_URL / ANTHROPIC_API_KEY
 
-from . import assistant  # noqa: E402
+from . import areas, assistant  # noqa: E402
 from .report import OutsideCoverage, build_report  # noqa: E402
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://koko:koko@127.0.0.1:5432/koko")
-pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=10, open=False)
+# the map requests many vector tiles at once
+pool = ConnectionPool(DATABASE_URL, min_size=2, max_size=20, open=False)
+areas.init(pool)
 
 
 @asynccontextmanager
@@ -35,6 +37,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="KOKO API", version="0.1.0", lifespan=lifespan,
               description="Address-level disaster risk for Japan, built on official open data.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+app.include_router(areas.router)
 
 
 @app.get("/health")

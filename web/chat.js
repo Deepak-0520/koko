@@ -9,7 +9,7 @@ const chatInput = document.getElementById("chat-input");
 const chatSend = document.getElementById("chat-send");
 const chatHistory = [];  // [{role, content}] plain-text turns sent back to the server each time (originals)
 const answers = [];      // [{el, orig, origLang, cache: {lang: text}}] finished answers, for the language switch
-const lookedUp = L.layerGroup().addTo(map);  // places the assistant checked
+const lookedUp = [];  // map markers for places the assistant checked
 
 // ---------- tabs ----------
 const tabs = { report: document.getElementById("tab-report"), chat: document.getElementById("tab-chat") };
@@ -59,8 +59,9 @@ function addToolNote(name, input) {
   div.dataset.input = JSON.stringify(input ?? {});
   renderToolNote(div);
   if (name === "get_risk_report" && Number.isFinite(+input?.lat) && Number.isFinite(+input?.lon)) {
-    L.circleMarker([+input.lat, +input.lon], { radius: 8, color: "#7c3aed", weight: 3, fillOpacity: 0.15 })
-      .bindTooltip(() => t("map.checkedByAi")).addTo(lookedUp);
+    const m = new maplibregl.Marker({ color: "#7c3aed", scale: 0.8 }).setLngLat([+input.lon, +input.lat]).addTo(map);
+    m.getElement().title = t("map.checkedByAi");
+    lookedUp.push(m);
   }
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
@@ -204,8 +205,12 @@ async function send(question) {
     chatHistory.pop();  // failed turn: drop the question so the next request stays valid
   }
 
-  if (placeLookups.length > 1) map.fitBounds(L.latLngBounds(placeLookups).pad(0.3));
-  else if (placeLookups.length === 1) map.flyTo(placeLookups[0], Math.max(map.getZoom(), 14));
+  if (placeLookups.length > 1) {
+    const lons = placeLookups.map((p) => p[1]), lats = placeLookups.map((p) => p[0]);
+    map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], { padding: 80, maxZoom: 14 });
+  } else if (placeLookups.length === 1) {
+    map.flyTo({ center: [placeLookups[0][1], placeLookups[0][0]], zoom: Math.max(map.getZoom(), 14) });
+  }
 }
 
 chatForm.addEventListener("submit", (e) => {
