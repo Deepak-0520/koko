@@ -58,7 +58,19 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
 .layout { display: grid; grid-template-columns: var(--panel-w) 1fr; height: calc(100% - 64px); }
 .panel { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--bg); }
 .report { flex: 1; overflow-y: auto; padding: 16px; }
+.mapwrap { position: relative; height: 100%; min-height: 0; }
 .map { height: 100%; }
+.map3d { position: absolute; inset: 0; z-index: 1100; background: #dfe3e8; }  /* above Leaflet panes and controls (z-index up to 1000) */
+.map3d[hidden], .legend3d[hidden] { display: none; }
+.view-toggle {
+  position: absolute; z-index: 1200; top: 84px; left: 10px; width: 34px; height: 34px;
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  border: 2px solid rgba(0,0,0,.2); border-radius: 4px; background: var(--surface); color: var(--ink);
+}
+.view-toggle[aria-pressed="true"] { top: 10px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.view-toggle:focus-visible { outline: 2px solid var(--accent); }
+.legend3d { position: absolute; z-index: 1200; right: 10px; bottom: 28px; max-width: 220px; }
+.legend3d .note { margin-top: 2px; }
 
 /* tabs */
 .tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); background: var(--surface); }
@@ -191,7 +203,7 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
   .brand p { display: none; }
   .search { max-width: none; flex-basis: 100%; }
   .layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; }
-  .map { grid-row: 1; height: 55vh; }
+  .mapwrap { grid-row: 1; height: 55vh; }
   .panel { grid-row: 2; border-right: 0; border-top: 1px solid var(--line); }
   .report, .chat-log { overflow: visible; }
   .chat-log { min-height: 260px; }

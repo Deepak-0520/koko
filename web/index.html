@@ -7,6 +7,8 @@
   <meta name="description" content="Click any place in Japan to see its flood, storm surge, landslide and earthquake risk, from official open data. 日本中どこでも、住所から災害リスクを確認。">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+        integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -73,13 +75,21 @@
         </section>
       </div>
     </aside>
-    <div id="map" class="map" aria-label="Map"></div>
+    <div class="mapwrap">
+      <div id="map" class="map" aria-label="Map"></div>
+      <div id="map3d" class="map3d" hidden></div>
+      <button type="button" id="view-toggle" class="view-toggle" aria-pressed="false">3D</button>
+      <div id="legend3d" class="legend legend3d" hidden></div>
+    </div>
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="i18n.js"></script>
   <script src="app.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+          integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin=""></script>
   <script src="chat.js"></script>
+  <script src="view3d.js"></script>
 </body>
 </html>

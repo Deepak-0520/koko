@@ -113,6 +113,8 @@ def layer_buildings(bbox: str = Query(..., description="west,south,east,north"),
                     'height_m', height_m, 'flood_depth_m', flood_max_depth_m))
             FROM koko.buildings
             WHERE geom && ST_MakeEnvelope(%(w)s, %(s)s, %(e)s, %(n)s, 4326)
+            -- when the cap is hit, keep the buildings nearest the view centre (no holes in the middle)
+            ORDER BY geom <-> ST_SetSRID(ST_MakePoint((%(w)s + %(e)s) / 2, (%(s)s + %(n)s) / 2), 4326)
             LIMIT %(limit)s""", {"w": w, "s": s, "e": e, "n": n, "limit": limit})
 
 
