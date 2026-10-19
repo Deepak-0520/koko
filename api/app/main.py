@@ -143,6 +143,20 @@ class ChatRequest(BaseModel):
     lang: Literal["en", "ja"] = "en"
 
 
+class TranslateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+    lang: Literal["en", "ja"]
+
+
+@app.post("/chat/translate")
+async def chat_translate(req: TranslateRequest):
+    """Translate a finished Ask KOKO answer when the user switches the interface language."""
+    try:
+        return {"text": await assistant.translate(req.text, req.lang)}
+    except assistant.TranslateError as e:
+        raise HTTPException(status_code=502 if e.code != "no_key" else 503, detail={"code": e.code})
+
+
 @app.get("/chat/status")
 def chat_status():
     return {"configured": assistant.is_configured(), "model": assistant.MODEL}

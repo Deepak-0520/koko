@@ -139,6 +139,55 @@ def _error(code: str, message: str) -> str:
 
 LANG_NAMES = {"en": "English", "ja": "Japanese"}
 
+TRANSLATE_SYSTEM = """You translate answers from KOKO, a disaster-risk assistant for Japan, between English \
+and Japanese for the interface language switch.
+- Output only the translation: no preamble, notes, or quotation marks.
+- Keep every number, unit, range, percentage and distance exactly as written.
+- Keep Markdown structure (bold, bullet lists, line breaks) as in the source.
+- Keep Japanese proper nouns (place names, addresses, facility names) in Japanese script in both directions.
+- Japanese: natural polite style (です・ます), with official terms such as 洪水浸水想定区域, 高潮浸水想定区域, \
+土砂災害警戒区域, 震度6弱, 指定緊急避難場所, 気象庁.
+- English: plain and clear; on first use, add the Japanese term in parentheses for official terms, \
+e.g. "storm surge zone (高潮浸水想定区域)"."""
+
+
+class TranslateError(Exception):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+async def translate(text: str, lang: str) -> str:
+    """Translate one finished answer into the interface language."""
+    if not is_configured():
+        raise TranslateError("no_key")
+    client = anthropic.AsyncAnthropic()
+    try:
+        response = await client.beta.messages.create(
+            model=MODEL,
+            max_tokens=16000,
+            system=TRANSLATE_SYSTEM,
+            messages=[{"role": "user", "content": f"Translate into {LANG_NAMES[lang]}:\n\n{text}"}],
+            output_config={"effort": "low"},
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+        )
+    except anthropic.AuthenticationError:
+        raise TranslateError("auth")
+    except anthropic.RateLimitError:
+        raise TranslateError("rate")
+    except anthropic.APIStatusError:
+        log.exception("Anthropic API error during translation")
+        raise TranslateError("api")
+    except anthropic.APIConnectionError:
+        raise TranslateError("conn")
+    if response.stop_reason == "refusal":
+        raise TranslateError("refusal")
+    out = "".join(b.text for b in response.content if b.type == "text").strip()
+    if not out or response.stop_reason == "max_tokens":
+        raise TranslateError("cut_off")
+    return out
+
 
 async def chat_stream(pool, history: list[dict], selection: dict | None, lang: str = "en") -> AsyncIterator[str]:
     """Stream one assistant turn. `history` is plain-text turns [{role, content}] from the browser."""
