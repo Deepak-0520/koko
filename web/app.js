@@ -18,7 +18,10 @@ const HAZARD_NAMES = {
   flood: "Flood", landslide: "Landslide", storm_surge: "Storm surge", earthquake: "Earthquake",
   tsunami: "Tsunami", fire: "Large fire", inland_flood: "Inland flood", volcano: "Volcano",
 };
-const LEVEL_TEXT = { none: "Not in zone", nodata: "No data here", low: "Low", mid: "Moderate", high: "High" };
+const DATASET_NAMES = {
+  flood: "river flood", landslide: "landslide zones", tsunami: "tsunami", storm_surge: "storm surge", shelters: "evacuation sites",
+};
+const LEVEL_TEXT ={ none: "Not in zone", nodata: "No data here", low: "Low", mid: "Moderate", high: "High" };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtM = (v) => (v == null ? "?" : `${+v.toFixed(2)} m`);
@@ -207,9 +210,18 @@ function renderReport(rep, addr) {
     ${chip("Flood", lv.flood)}
     ${chip("Storm surge", lv.surge)}
     ${chip("Landslide", lv.slide)}
-    ${lv.quake ? chip("Earthquake (6-lower)", lv.quake, `${LEVEL_TEXT[lv.quake]} · ${Math.round(p6 * 100)}%`) : chip("Earthquake", "none", "Unavailable")}
+    ${lv.quake ? chip("Earthquake (6-lower)", lv.quake, `${LEVEL_TEXT[lv.quake]} · ${p6 < 0.01 ? "<1" : Math.round(p6 * 100)}%`) : chip("Earthquake", "none", "Unavailable")}
   </div>`;
 
+  const missing = Object.entries(rep.data_available).filter(([, ok]) => !ok).map(([k]) => DATASET_NAMES[k]);
+  if (missing.length === Object.keys(rep.data_available).length) {
+    html += `<div class="card notice"><h3>⏳ ${esc(a.pref_en)} is still being loaded</h3>
+      <p>KOKO is downloading official hazard data for all of Japan, and ${esc(a.pref_ja)} isn't in the database yet.
+      The earthquake data below is live. Meanwhile the coloured flood layer on the map already covers this area.</p></div>`;
+  } else if (missing.length) {
+    html += `<div class="card notice"><p><b>Not loaded here yet:</b> ${esc(missing.join(", "))}.
+      Results for these show as “No data here”, which is not the same as safe.</p></div>`;
+  }
   html += floodCard(rep);
   html += buildingCard(rep);
   html += quakeCard(rep.earthquake);
@@ -311,6 +323,9 @@ function shelterCard(s) {
   if (per.length) {
     html += `<p>Nearest site rated for each danger here:</p><ul class="shelters">` +
       per.map(([h, x]) => item(x, `<b>${HAZARD_NAMES[h]}:</b> `)).join("") + `</ul>`;
+  }
+  if (!s.nearest.length) {
+    return html + `<p>No evacuation sites within 25 km in KOKO's data yet. Check your city's hazard map for the designated sites.</p></div>`;
   }
   html += `<p style="margin-top:10px">All nearby sites:</p><ul class="shelters">${s.nearest.map((x) => item(x)).join("")}</ul>
     <p class="src">Straight-line distance. Source: 国土地理院 指定緊急避難場所データ</p></div>`;

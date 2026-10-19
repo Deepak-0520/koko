@@ -167,7 +167,9 @@ def _shelter_rows(cur, p, where: str = "TRUE", limit: int = 5):
         SELECT name, address, remarks, {", ".join(SHELTER_TYPES)},
                ST_X(geom) AS lon, ST_Y(geom) AS lat,
                round(ST_Distance(geom::geography, {PT}::geography)) AS distance_m
-        FROM koko.shelters WHERE {where} ORDER BY geom <-> {PT} LIMIT %(limit)s""", p | {"limit": limit})
+        FROM koko.shelters
+        WHERE {where} AND ST_DWithin(geom, {PT}, 0.25)  -- ~25 km: a site further away is no help
+        ORDER BY geom <-> {PT} LIMIT %(limit)s""", p | {"limit": limit})
     return [{"name": r["name"], "address": r["address"], "remarks": r["remarks"],
              "lat": r["lat"], "lon": r["lon"], "distance_m": int(r["distance_m"]), "straight_line": True,
              "for": [t for t in SHELTER_TYPES if r[t]], "source": "shelters"} for r in cur.fetchall()]
@@ -194,8 +196,8 @@ def build_report(conn: Connection, lat: float, lon: float, *, with_earthquake: b
     with conn.cursor(row_factory=dict_row) as cur:
         area = _area(cur, p)
         if not area:
-            raise OutsideCoverage("No data for this location: it is outside Japan, at sea, "
-                                  "or its prefecture has not been loaded yet.")
+            raise OutsideCoverage("This point is not inside any Japanese municipality (it may be at sea "
+                                  "or outside Japan). Click on land to see a report.")
         coverage = _coverage(cur, area["pref_code"], first_mesh(lat, lon))
         flood = _flood(cur, p)
         building = _building(cur, p)

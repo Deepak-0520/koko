@@ -132,6 +132,8 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
 .card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 13px; }
 .card dt { color: var(--ink-3); }
 .card dd { margin: 0; color: var(--ink); }
+.card.notice { background: #f3f0fb; border-color: #ddd3f5; }
+.card.notice p { color: var(--ink); }
 .src { font-size: 11px; color: var(--ink-3); margin-top: 8px; }
 
 .verdict { padding: 10px 12px; border-radius: 8px; font-size: 14px; line-height: 1.45; border-left: 4px solid; }

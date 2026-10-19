@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 import geopandas as gpd
@@ -142,7 +143,9 @@ def load_all(layers: list[str] | None = None, *, reset: bool = False, force: boo
         for layer in layers or LAYERS:
             dirs = [staged_dir / layer] + ([staged_dir / "plateau"] if layer == "buildings" else [])
             files = sorted(p for d in dirs if d.is_dir() for p in d.glob("*.parquet"))
-            todo = [p for p in files if force or loaded.get((layer, p.stem)) != p.stat().st_mtime]
+            # files touched in the last minute may still be being written by a running stage job
+            settled = [p for p in files if time.time() - p.stat().st_mtime > 60]
+            todo = [p for p in settled if force or loaded.get((layer, p.stem)) != p.stat().st_mtime]
             log.info("%s: %d staged files, %d to load", layer, len(files), len(todo))
             for i, path in enumerate(todo, 1):
                 n = _load_file(conn, layer, path)

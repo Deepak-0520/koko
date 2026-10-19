@@ -31,7 +31,9 @@ def _path(layer: str, src: str):
 def _save(gdf: gpd.GeoDataFrame, layer: str, src: str) -> None:
     path = _path(layer, src)
     path.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_parquet(path)
+    tmp = path.with_suffix(".parquet.tmp")  # write then rename, so a loader never sees half a file
+    gdf.to_parquet(tmp)
+    tmp.replace(path)
     log.info("staged %s/%s: %d rows", layer, src, len(gdf))
 
 
