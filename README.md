@@ -1,34 +1,33 @@
 # KOKO (ここ)
 
-Address-level disaster risk for Japan, built on official open data. See [PLAN.md](PLAN.md) for the product plan.
+**Disaster risk for any address in Japan, explained by AI in your language, grounded in official open data.**
 
-**Status:** Phase 2. A Leaflet dashboard sits on top of the data pipeline and point-lookup API, which cover the Tokyo 23 wards. The hazard map layers themselves are nationwide.
+KOKO combines Japan's national hazard datasets (MLIT 国土数値情報, PLATEAU 3D city models, GSI evacuation sites, NIED J-SHIS) into one click-for-a-report map and an AI assistant. The assistant answers questions like *"I want to rent here with my 2-year-old. Is it safe?"* in any language. Every number in its answers comes from a database lookup, never from the model's memory.
 
-## Dashboard
+See [PLAN.md](PLAN.md) for the product plan.
 
-Open http://127.0.0.1:8000 after starting the API (see below).
+## Features
 
-- **Map layers:** official flood depth, flood duration, storm surge and landslide tiles (ハザードマップポータル, all of Japan); ward boundaries, evacuation sites, and PLATEAU buildings coloured by their own flood depth (from our PostGIS)
-- **Click anywhere** for a report: risk level chips, worst-case flood, which floor of the building stays dry, 30-year earthquake probabilities, other hazards, and the nearest evacuation site for each danger present
-- **Search** a Japanese address (GSI address search) or type `lat,lon`
+- **Map dashboard** (Leaflet): official flood depth / duration, storm surge and landslide layers for all of Japan; municipality boundaries; evacuation sites; PLATEAU buildings coloured by their own flood depth
+- **Click-for-report** for any point: risk chips, worst-case flood depth and duration, house-collapse zones, **which floor of the building stays dry**, landslide / storm surge / tsunami zones, 30-year shaking probabilities, and the nearest evacuation site *rated for each hazard present*
+- **Ask KOKO (AI)**: a Claude agent (`claude-opus-5-5`) with two tools, `search_address` (GSI) and `get_risk_report` (our PostGIS). It answers in the user's language, compares places, marks what it checked on the map, and must say when data is missing (*"no published data"* is not *"safe"*)
 
-Plain HTML + Leaflet 1.9.4 in `web/`, served by FastAPI. There is no build step.
+## How it works
 
-## What a report contains
+```
+国土数値情報 (A31b flood, A33 landslide, A40 tsunami, A49 storm surge, N03 boundaries)
+GSI 指定緊急避難場所 tiles · PLATEAU CityGML (HTTP range requests)       J-SHIS API (live)
+                │  pipeline: discover newest file per prefecture → stage GeoParquet → COPY
+                ▼                                                            │
+        PostGIS (Docker) ──────────── FastAPI /report, /layers/*, /chat ─────┘
+                                            │                 │
+                                   Leaflet dashboard    Claude tool-use loop (SSE streaming)
+```
 
-`GET /report?lat=35.6835&lon=139.8642` returns, for that exact point:
-
-| Section | Source |
-|---|---|
-| River flood depth (max assumed L2 / planned L1), flood duration, house-collapse zones | 国土数値情報 A31b (2025) |
-| The building at the point: usage, storeys, height, PLATEAU's per-building flood depth | PLATEAU CityGML (2025) |
-| Vertical evacuation: lowest floor above the expected depth, or "leave the building" | derived; see `api/app/report.py` |
-| Landslide warning zones | 国土数値情報 A33 (2023) |
-| Storm surge / tsunami inundation depth | 国土数値情報 A49 (2020) / A40 (2023) |
-| 30-year probability of shaking ≥ 5-, 5+, 6-, 6+ | J-SHIS Y2024 (live API, cached) |
-| Nearest designated evacuation sites, plus the nearest site rated for each hazard present | GSI 指定緊急避難場所 |
-
-Every section names its `source`, and `sources` lists titles and URLs.
+Design choices worth knowing:
+- **Safety first when sources disagree:** PLATEAU's per-building flood depth is used only when it agrees with the zone at the exact point; otherwise the zone's upper bound. House-collapse zones override "go upstairs".
+- **"Not in a zone" vs "no data":** the report tracks which datasets exist for each prefecture and flood mesh, so the UI and the AI never present missing data as safety.
+- **Incremental national loads:** every row carries its source file (`src`), and `loaded_files` records what's in the database, so an interrupted national run resumes where it stopped.
 
 ## Run it
 
@@ -42,41 +41,46 @@ docker compose up -d --wait
 python -m venv .venv && .venv/Scripts/python -m pip install -e pipeline -r api/requirements.txt pytest
 ```
 
+Stage data (start small with one prefecture, e.g. `--prefs 27` for Osaka; `all` takes a few hours):
+
 ```bash
-.venv/Scripts/python -m koko_pipeline stage
+.venv/Scripts/python -m koko_pipeline stage --prefs all
 ```
 
 ```bash
-.venv/Scripts/python -m koko_pipeline plateau --wards 13101
+.venv/Scripts/python -m koko_pipeline plateau --cities major
 ```
 
 ```bash
 .venv/Scripts/python -m koko_pipeline load
 ```
 
+For the AI chat, copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`. Then start the server:
+
 ```bash
 cd api && ../.venv/Scripts/python -m uvicorn app.main:app --port 8000
 ```
 
-Then open http://127.0.0.1:8000/docs. Use `--wards all` to stage PLATEAU for all 23 wards (several GB of range requests and roughly an hour).
+Open http://127.0.0.1:8000 (dashboard) or http://127.0.0.1:8000/docs (API).
 
 ## Layout
 
 ```
-pipeline/koko_pipeline/   download → stage (GeoParquet in data/staged) → load (COPY into PostGIS)
-  ksj.py                  国土数値情報 hazard layers, clipped to the 23 wards
-  gsi.py                  GSI shelter tiles (skhb01–08), merged per site
+pipeline/koko_pipeline/   catalog → download → stage (data/staged/<layer>/<src>.parquet) → load (COPY)
+  catalog.py              finds the newest KSJ file per prefecture / flood mesh from the dataset pages
+  ksj.py                  国土数値情報 layers (GeoJSON or Shapefile, per prefecture or mesh)
+  gsi.py                  GSI shelter tiles, cached, assigned to one prefecture by address
   plateau.py              PLATEAU CityGML via HTTP range requests: only udx/bldg + codelists
-  load.py                 COPY loader; sql/ has the schema and post-load indexes
-api/app/                  FastAPI: /health, /wards, /report, /layers/{wards,shelters,buildings}
-web/                      Leaflet dashboard (index.html, app.js, style.css)
+  load.py                 incremental COPY loader; sql/ has the schema
+api/app/                  FastAPI: /report, /coverage, /layers/{areas,shelters,buildings}, /chat
+  assistant.py            Ask KOKO: Claude tool-use loop, streamed as Server-Sent Events
+web/                      Leaflet dashboard (index.html, app.js, chat.js, style.css)
 tests/                    logic tests (pytest)
 ```
 
 ## Data notes
 
-- **Tsunami:** the Tokyo A40 dataset only covers the Izu and Ogasawara islands, so no 23-ward point is in a tsunami zone. The API reports `in_zone: false`, which means "not in a designated zone", not "no risk".
-- **Flood depth disagreement:** PLATEAU gives each building the depth of the mesh it overlaps most, which can be lower than the zone at the exact point. Vertical-evacuation advice uses the PLATEAU value only when it agrees with the zone rank, and otherwise the zone's upper bound.
+- **Coverage varies by dataset:** landslide zones cover all 47 prefectures (2025); tsunami covers 39 coastal prefectures and storm surge 15, each in the newest edition published (2016–2024). PLATEAU buildings cover the Tokyo 23 wards and the major cities staged.
 - **PLATEAU sentinels:** 9999 / -9999 (unknown storeys or height) are stored as NULL.
 - **Licences:** 国土数値情報, PLATEAU, GSI, and J-SHIS each have attribution terms. Check them before any commercial use.
 - Shelter distances are straight-line; walking routes are a later phase.

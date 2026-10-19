@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import geopandas as gpd
@@ -28,13 +29,17 @@ NS = {
 BUILDING_TAG = f"{{{NS['bldg']}}}Building"
 
 
-def catalog_url(ward_code: str) -> str:
-    """Latest CityGML zip URL for a ward from the PLATEAU data catalog."""
-    cat = requests.get(config.SOURCES["plateau"]["url"], timeout=120).json()
-    rows = [r for r in cat["citygml"] if r["city_code"] == ward_code]
+@lru_cache(maxsize=1)
+def _catalog() -> list[dict]:
+    return requests.get(config.DATASETS["buildings"]["url"], timeout=120).json()["citygml"]
+
+
+def catalog_entry(city_code: str) -> dict:
+    """Latest CityGML entry for a city (or Tokyo ward) from the PLATEAU data catalog."""
+    rows = [r for r in _catalog() if r["city_code"] == city_code]
     if not rows:
-        raise LookupError(f"no PLATEAU CityGML for {ward_code}")
-    return max(rows, key=lambda r: r["year"])["url"]
+        raise LookupError(f"no PLATEAU CityGML for {city_code}")
+    return max(rows, key=lambda r: r["year"])
 
 
 def _local(tag: str) -> str:
@@ -152,9 +157,15 @@ def iter_buildings(stream, codelists):
             del parent[0]
 
 
-def stage_ward(ward_code: str, url: str | None = None) -> gpd.GeoDataFrame:
-    url = url or catalog_url(ward_code)
-    log.info("PLATEAU %s: %s", ward_code, url)
+def stage_city(city_code: str, own_codes: set[str]) -> gpd.GeoDataFrame:
+    """Buildings of one PLATEAU dataset.
+
+    own_codes is the set of municipality codes this dataset owns: the city itself, plus its wards
+    for a designated city (Osaka 27100 owns 27102–27128). Mesh files on the edge also contain the
+    neighbouring city's buildings; those belong to that city's dataset and are dropped here.
+    """
+    url = catalog_entry(city_code)["url"]
+    log.info("PLATEAU %s: %s", city_code, url)
     rows = []
     with RemoteZip(url) as z:
         codelists = parse_codelists(z)
@@ -165,9 +176,6 @@ def stage_ward(ward_code: str, url: str | None = None) -> gpd.GeoDataFrame:
                 rows.extend(iter_buildings(f, codelists))
             log.info("  [%d/%d] %s: %d buildings", i, len(members), Path(name).name, len(rows) - before)
     gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:6668").to_crs("EPSG:4326")
-    # mesh files on the ward edge also contain the neighbouring ward's buildings; that ward owns them
-    city = gdf.pop("city_code").fillna(gdf["id"].str[:5])
-    gdf = gdf[city == ward_code].drop_duplicates("id")
-    gdf = gdf.astype({"storeys_above": "Int16", "storeys_below": "Int16"})
-    gdf["ward_code"] = ward_code
-    return gdf
+    gdf["city_code"] = gdf["city_code"].fillna(gdf["id"].str[:5])
+    gdf = gdf[gdf["city_code"].isin(own_codes | {city_code})].drop_duplicates("id")
+    return gdf.astype({"storeys_above": "Int16", "storeys_below": "Int16"})

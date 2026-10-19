@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>KOKO — Tokyo Risk Map</title>
-  <meta name="description" content="Click any place in Tokyo's 23 wards to see its flood, storm surge, landslide and earthquake risk, from official open data.">
+  <title>KOKO — Japan Risk Map</title>
+  <meta name="description" content="Click any place in Japan to see its flood, storm surge, landslide and earthquake risk, from official open data.">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="style.css">
@@ -15,7 +15,7 @@
       <span class="brand-mark">ここ</span>
       <div>
         <h1>KOKO</h1>
-        <p>Tokyo 23 wards · disaster risk for any address</p>
+        <p>Disaster risk for any address in Japan</p>
       </div>
     </div>
     <form id="search" class="search" role="search">
@@ -26,7 +26,31 @@
   </header>
 
   <main class="layout">
-    <aside id="panel" class="panel" aria-live="polite">
+    <aside class="panel">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tab-report" aria-selected="true" aria-controls="panel">Report</button>
+        <button role="tab" id="tab-chat" aria-selected="false" aria-controls="chat">✨ Ask KOKO <span class="badge">AI</span></button>
+      </div>
+      <section id="chat" class="chat" hidden>
+        <div id="chat-log" class="chat-log" aria-live="polite">
+          <div class="chat-welcome">
+            <p><b>Ask anything about a place in Japan</b>, in any language. KOKO looks up the official data first,
+              then explains it. Click the map first to ask about "this place".</p>
+            <div class="suggest">
+              <button data-q="Is this place safe for a family with small kids? What should we prepare?">Is this place safe for my family?</button>
+              <button data-q="Compare flood and earthquake risk: 江戸川区船堀 vs 大阪市北区梅田">Compare Edogawa vs Umeda</button>
+              <button data-q="この場所の洪水リスクを分かりやすく説明してください">この場所の洪水リスクは？</button>
+              <button data-q="यो ठाउँ बाढीको लागि सुरक्षित छ? नेपालीमा बताउनुहोस्।">नेपालीमा सोध्नुहोस्</button>
+            </div>
+          </div>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" rows="2" placeholder="e.g. Which floor is safe here if the river floods?" aria-label="Ask KOKO"></textarea>
+          <button type="submit" id="chat-send">Send</button>
+        </form>
+        <p class="chat-note">AI answers use only KOKO's official data. In an emergency, follow JMA and your city's orders.</p>
+      </section>
+      <div id="panel" class="report" aria-live="polite">
       <section class="intro">
         <h2>Click anywhere on the map</h2>
         <p>KOKO checks that exact spot against official Japanese hazard data and explains it in plain language.</p>
@@ -37,10 +61,13 @@
           <li><b>Earthquake</b>: chance of strong shaking in the next 30 years</li>
           <li><b>Shelters</b>: the nearest evacuation sites for each danger</li>
         </ul>
-        <p class="hint">Try: <a href="#" data-goto="35.6835,139.8642">Edogawa Funabori</a> ·
-          <a href="#" data-goto="35.6950,139.7745">Kanda-Iwamotocho</a> ·
-          <a href="#" data-goto="35.6812,139.7671">Tokyo Station</a></p>
+        <p class="hint">Try: <a href="#" data-goto="35.6835,139.8642">Tokyo · Edogawa</a> ·
+          <a href="#" data-goto="35.6950,139.7745">Tokyo · Kanda</a> ·
+          <a href="#" data-goto="34.6825,135.4660">Osaka · Nishikujo</a> ·
+          <a href="#" data-goto="34.7025,135.4959">Osaka · Umeda</a></p>
+        <p class="hint">Building-level detail (PLATEAU) is available in Tokyo's 23 wards and major cities.</p>
       </section>
+      </div>
     </aside>
     <div id="map" class="map" aria-label="Map"></div>
   </main>
@@ -48,5 +75,6 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="app.js"></script>
+  <script src="chat.js"></script>
 </body>
 </html>

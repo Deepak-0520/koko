@@ -72,3 +72,18 @@ def test_long_duration_is_flagged():
 def test_no_building_data():
     r = vertical_evacuation(None, flood())
     assert r["verdict"] == "unknown"
+
+
+def test_first_mesh_codes():
+    from app.report import first_mesh
+    assert first_mesh(35.6812, 139.7671) == "5339"  # Tokyo Station
+    assert first_mesh(34.7025, 135.4959) == "5235"  # Osaka Umeda
+    assert first_mesh(43.0687, 141.3508) == "6441"  # Sapporo
+
+
+def test_first_meshes_cover_an_area():
+    from shapely.geometry import box
+
+    from koko_pipeline.cli import first_meshes
+    assert first_meshes(box(139.7, 35.6, 139.8, 35.7)) == {"5339"}
+    assert first_meshes(box(135.3, 34.6, 135.6, 34.7)) == {"5135", "5235"}  # crosses 34°40'

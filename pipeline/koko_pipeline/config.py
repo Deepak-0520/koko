@@ -1,4 +1,4 @@
-"""Static configuration: target area, source URLs, code lists."""
+"""Static configuration: prefectures, dataset pages, code lists."""
 from __future__ import annotations
 
 import os
@@ -11,69 +11,71 @@ STAGED_DIR = DATA_DIR / "staged"
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://koko:koko@127.0.0.1:5432/koko")
 
-# Tokyo 23 special wards: code -> (Japanese, English)
-TOKYO_23 = {
-    "13101": ("千代田区", "Chiyoda"),
-    "13102": ("中央区", "Chuo"),
-    "13103": ("港区", "Minato"),
-    "13104": ("新宿区", "Shinjuku"),
-    "13105": ("文京区", "Bunkyo"),
-    "13106": ("台東区", "Taito"),
-    "13107": ("墨田区", "Sumida"),
-    "13108": ("江東区", "Koto"),
-    "13109": ("品川区", "Shinagawa"),
-    "13110": ("目黒区", "Meguro"),
-    "13111": ("大田区", "Ota"),
-    "13112": ("世田谷区", "Setagaya"),
-    "13113": ("渋谷区", "Shibuya"),
-    "13114": ("中野区", "Nakano"),
-    "13115": ("杉並区", "Suginami"),
-    "13116": ("豊島区", "Toshima"),
-    "13117": ("北区", "Kita"),
-    "13118": ("荒川区", "Arakawa"),
-    "13119": ("板橋区", "Itabashi"),
-    "13120": ("練馬区", "Nerima"),
-    "13121": ("足立区", "Adachi"),
-    "13122": ("葛飾区", "Katsushika"),
-    "13123": ("江戸川区", "Edogawa"),
+PREFECTURES = {
+    "01": ("北海道", "Hokkaido"), "02": ("青森県", "Aomori"), "03": ("岩手県", "Iwate"),
+    "04": ("宮城県", "Miyagi"), "05": ("秋田県", "Akita"), "06": ("山形県", "Yamagata"),
+    "07": ("福島県", "Fukushima"), "08": ("茨城県", "Ibaraki"), "09": ("栃木県", "Tochigi"),
+    "10": ("群馬県", "Gunma"), "11": ("埼玉県", "Saitama"), "12": ("千葉県", "Chiba"),
+    "13": ("東京都", "Tokyo"), "14": ("神奈川県", "Kanagawa"), "15": ("新潟県", "Niigata"),
+    "16": ("富山県", "Toyama"), "17": ("石川県", "Ishikawa"), "18": ("福井県", "Fukui"),
+    "19": ("山梨県", "Yamanashi"), "20": ("長野県", "Nagano"), "21": ("岐阜県", "Gifu"),
+    "22": ("静岡県", "Shizuoka"), "23": ("愛知県", "Aichi"), "24": ("三重県", "Mie"),
+    "25": ("滋賀県", "Shiga"), "26": ("京都府", "Kyoto"), "27": ("大阪府", "Osaka"),
+    "28": ("兵庫県", "Hyogo"), "29": ("奈良県", "Nara"), "30": ("和歌山県", "Wakayama"),
+    "31": ("鳥取県", "Tottori"), "32": ("島根県", "Shimane"), "33": ("岡山県", "Okayama"),
+    "34": ("広島県", "Hiroshima"), "35": ("山口県", "Yamaguchi"), "36": ("徳島県", "Tokushima"),
+    "37": ("香川県", "Kagawa"), "38": ("愛媛県", "Ehime"), "39": ("高知県", "Kochi"),
+    "40": ("福岡県", "Fukuoka"), "41": ("佐賀県", "Saga"), "42": ("長崎県", "Nagasaki"),
+    "43": ("熊本県", "Kumamoto"), "44": ("大分県", "Oita"), "45": ("宮崎県", "Miyazaki"),
+    "46": ("鹿児島県", "Kagoshima"), "47": ("沖縄県", "Okinawa"),
 }
 
-# Generous bbox around the 23 wards (lon_min, lat_min, lon_max, lat_max), used for fast pre-filtering
-TOKYO_23_BBOX = (139.55, 35.48, 139.93, 35.83)
+# PLATEAU "major cities" set: Tokyo 23 wards plus the largest cities that have PLATEAU models
+TOKYO_23 = [f"131{n:02d}" for n in range(1, 24)]
+MAJOR_CITIES = {
+    "01100": "Sapporo", "04100": "Sendai", "11100": "Saitama", "12100": "Chiba",
+    "14100": "Yokohama", "14130": "Kawasaki", "22100": "Shizuoka", "22130": "Hamamatsu",
+    "23100": "Nagoya", "26100": "Kyoto", "27100": "Osaka", "28100": "Kobe",
+    "34100": "Hiroshima", "40100": "Kitakyushu", "40130": "Fukuoka", "43100": "Kumamoto",
+}
 
-KSJ = "https://nlftp.mlit.go.jp/ksj/gml/data"
-SOURCES = {
-    "wards": {
-        "url": f"{KSJ}/N03/N03-2025/N03-20250101_13_GML.zip",
-        "title": "国土数値情報 行政区域 (N03) 2025",
+KSJ = "https://nlftp.mlit.go.jp/ksj/gml"
+# Dataset pages list every download; the pipeline picks the newest file per prefecture / mesh.
+DATASETS = {
+    "municipalities": {
+        "title": "国土数値情報 行政区域 (N03) 2026",
+        "page": f"{KSJ}/datalist/KsjTmplt-N03-2026.html",
+        "url": f"{KSJ}/data/N03/N03-2026/N03-20260101_{{pref}}_GML.zip",
     },
-    "flood_designated": {
-        "url": f"{KSJ}/A31b/A31b-25/A31b-25_10_5339_GEOJSON.zip",
-        "title": "国土数値情報 洪水浸水想定区域 (A31b) 2025 — 洪水予報河川・水位周知河川",
-    },
-    "flood_other": {
-        "url": f"{KSJ}/A31b/A31b-25/A31b-25_20_5339_GEOJSON.zip",
-        "title": "国土数値情報 洪水浸水想定区域 (A31b) 2025 — その他の河川",
+    "flood": {
+        "title": "国土数値情報 洪水浸水想定区域 (A31b) 2025",
+        "page": f"{KSJ}/datalist/KsjTmplt-A31b-2025.html",
+        "link": r"data/A31b/A31b-25/A31b-25_(?P<cls>10|20)_(?P<mesh>\d{4})_GEOJSON\.zip",
     },
     "landslide": {
-        "url": f"{KSJ}/A33/A33-23/A33-23_13_GML.zip",
-        "title": "国土数値情報 土砂災害警戒区域 (A33) 2023",
+        "title": "国土数値情報 土砂災害警戒区域 (A33) 2025",
+        "page": f"{KSJ}/datalist/KsjTmplt-A33-2025.html",
+        "url": f"{KSJ}/data/A33/A33-25/A33-25_{{pref}}_SHP.zip",
     },
     "tsunami": {
-        "url": f"{KSJ}/A40/A40-23/A40-23_13_GML.zip",
-        "title": "国土数値情報 津波浸水想定 (A40) 2023",
+        "title": "国土数値情報 津波浸水想定 (A40)",
+        "page": f"{KSJ}/datalist/KsjTmplt-A40-2024.html",
+        "link": r"data/A40/A40-(?P<year>\d{2})/A40-\d{2}_(?P<pref>\d{2})_GML\.zip",
     },
     "storm_surge": {
-        "url": f"{KSJ}/A49/A49-20/A49-20_13_GML.zip",
-        "title": "国土数値情報 高潮浸水想定区域 (A49) 2020",
+        "title": "国土数値情報 高潮浸水想定区域 (A49)",
+        "page": f"{KSJ}/datalist/KsjTmplt-A49-2024.html",
+        "link": r"data/A49/A49-(?P<year>\d{2})/A49-\d{2}_(?P<pref>\d{2})_GML\.zip",
     },
     "shelters": {
-        "url": "https://cyberjapandata.gsi.go.jp/xyz/skhb0{n}/{z}/{x}/{y}.geojson",
         "title": "国土地理院 指定緊急避難場所データ (skhb01–08)",
+        "page": "https://www.gsi.go.jp/bousaichiri/hinanbasho.html",
+        "url": "https://cyberjapandata.gsi.go.jp/xyz/skhb0{n}/{z}/{x}/{y}.geojson",
     },
-    "plateau": {
-        "url": "https://api.plateau.reearth.io/datacatalog/plateau-datasets",
+    "buildings": {
         "title": "Project PLATEAU 3D都市モデル 建築物 (CityGML)",
+        "page": "https://www.mlit.go.jp/plateau/open-data/",
+        "url": "https://api.plateau.reearth.io/datacatalog/plateau-datasets",
     },
 }
 

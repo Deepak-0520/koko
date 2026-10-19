@@ -2,7 +2,7 @@
 "use strict";
 
 const API = "";  // same origin as the FastAPI server
-const TOKYO = [35.69, 139.77];
+const JAPAN = [36.2, 138.3];
 const BUILDINGS_MIN_ZOOM = 16;
 
 // Official MLIT legend for flood depth (想定最大規模), so our colours match the GSI hazard tiles
@@ -18,7 +18,7 @@ const HAZARD_NAMES = {
   flood: "Flood", landslide: "Landslide", storm_surge: "Storm surge", earthquake: "Earthquake",
   tsunami: "Tsunami", fire: "Large fire", inland_flood: "Inland flood", volcano: "Volcano",
 };
-const LEVEL_TEXT = { none: "Not in zone", low: "Low", mid: "Moderate", high: "High" };
+const LEVEL_TEXT = { none: "Not in zone", nodata: "No data here", low: "Low", mid: "Moderate", high: "High" };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtM = (v) => (v == null ? "?" : `${+v.toFixed(2)} m`);
@@ -30,7 +30,7 @@ function hours(r) {
 }
 
 // ---------- map & layers ----------
-const map = L.map("map", { preferCanvas: true, zoomControl: true }).setView(TOKYO, 12);
+const map = L.map("map", { preferCanvas: true, zoomControl: true }).setView(JAPAN, 6);
 
 const gsiAttr = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>';
 const base = {
@@ -55,23 +55,47 @@ const overlays = {
   ]),
 };
 
-// Ward boundaries (our PostGIS)
-const wards = L.geoJSON(null, {
-  style: { color: "#0b5cad", weight: 1.5, fill: false, opacity: 0.7 },
-  onEachFeature: (f, layer) => layer.bindTooltip(`${f.properties.name_en} · ${f.properties.name_ja}`, { sticky: true }),
-}).addTo(map);
-fetch(`${API}/layers/wards`).then((r) => r.json()).then((d) => wards.addData(d)).catch(() => {});
+// Layers from our PostGIS that are fetched for the current view only (there are too many for all of Japan)
+function viewLayer(layer, path, minZoom) {
+  let req = 0;
+  async function refresh() {
+    if (!map.hasLayer(layer)) return;
+    if (map.getZoom() < minZoom) { layer.clearLayers(); return; }
+    const b = map.getBounds();
+    const id = ++req;
+    try {
+      const r = await fetch(`${API}${path}?bbox=${[b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(5)).join(",")}`);
+      if (!r.ok || id !== req) return;
+      const data = await r.json();
+      if (id !== req) return;
+      layer.clearLayers();
+      layer.addData(data);
+    } catch { /* offline: keep map usable */ }
+  }
+  map.on("moveend", refresh);
+  map.on("overlayadd", (e) => e.layer === layer && refresh());
+  return refresh;
+}
 
-// Evacuation sites (our PostGIS, from GSI 指定緊急避難場所)
+// Municipality boundaries (国土数値情報 N03)
+const areas = L.geoJSON(null, {
+  style: { color: "#0b5cad", weight: 1.2, fill: false, opacity: 0.6 },
+  onEachFeature: (f, layer) => layer.bindTooltip(`${f.properties.pref_ja} ${f.properties.name_ja ?? ""}`, { sticky: true }),
+});
+overlays["Municipality boundaries"] = areas;
+areas.addTo(map);
+const refreshAreas = viewLayer(areas, "/layers/areas", 9);
+
+// Evacuation sites (GSI 指定緊急避難場所)
 const shelters = L.geoJSON(null, {
   pointToLayer: (f, ll) => L.circleMarker(ll, {
     radius: 4, weight: 1.5, color: "#ffffff", fillColor: f.properties.flood ? "#0b5cad" : "#5b6670", fillOpacity: 0.95,
   }),
   onEachFeature: (f, layer) => layer.bindPopup(shelterPopup(f.properties)),
 });
-fetch(`${API}/layers/shelters`).then((r) => r.json()).then((d) => shelters.addData(d)).catch(() => {});
-overlays["Evacuation sites"] = shelters;
+overlays["Evacuation sites (zoom in)"] = shelters;
 shelters.addTo(map);
+const refreshShelters = viewLayer(shelters, "/layers/shelters", 12);
 
 // PLATEAU buildings, coloured by their own flood depth (our PostGIS); loaded per view when zoomed in
 const buildings = L.geoJSON(null, {
@@ -89,22 +113,8 @@ const buildings = L.geoJSON(null, {
 });
 overlays["PLATEAU buildings (zoom in)"] = buildings;
 buildings.addTo(map);
-
-let bldgReq = 0;
-async function refreshBuildings() {
-  if (!map.hasLayer(buildings)) return;
-  buildings.clearLayers();
-  if (map.getZoom() < BUILDINGS_MIN_ZOOM) return;
-  const b = map.getBounds();
-  const id = ++bldgReq;
-  try {
-    const r = await fetch(`${API}/layers/buildings?bbox=${[b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map((v) => v.toFixed(5)).join(",")}`);
-    if (!r.ok || id !== bldgReq) return;
-    buildings.addData(await r.json());
-  } catch { /* offline: keep map usable */ }
-}
-map.on("moveend", refreshBuildings);
-map.on("overlayadd", (e) => e.layer === buildings && refreshBuildings());
+const refreshBuildings = viewLayer(buildings, "/layers/buildings", BUILDINGS_MIN_ZOOM);
+map.whenReady(() => { refreshAreas(); refreshShelters(); refreshBuildings(); });
 
 L.control.layers(base, overlays, { collapsed: window.innerWidth < 820 }).addTo(map);
 L.control.scale({ imperial: false }).addTo(map);
@@ -125,11 +135,13 @@ function depthClass(d) { return DEPTH_CLASSES.find((c) => d < c.max); }
 // ---------- report ----------
 const panel = document.getElementById("panel");
 let pin = null;
+let selection = null;  // last place picked on the map; Ask KOKO uses it for "this place"
 
 map.on("click", (e) => runReport(e.latlng.lat, e.latlng.lng));
 
 async function runReport(lat, lon, label) {
   if (pin) pin.setLatLng([lat, lon]); else pin = L.marker([lat, lon]).addTo(map);
+  selection = { lat, lon, label: label || null };
   panel.innerHTML = `<div class="loading">Checking ${lat.toFixed(5)}, ${lon.toFixed(5)}…</div>`;
   try {
     const [rep, addr] = await Promise.all([
@@ -140,6 +152,8 @@ async function runReport(lat, lon, label) {
       }),
       label ? Promise.resolve(label) : reverseGeocode(lat, lon),
     ]);
+    const a = rep.location.area;
+    selection.label = addr && addr.startsWith(a.pref_ja) ? addr : `${a.pref_ja}${a.name_ja ?? ""}${addr ? ` ${addr}` : ""}`;
     panel.innerHTML = renderReport(rep, addr);
     panel.scrollTop = 0;
     panel.querySelectorAll("[data-shelter]").forEach((btn) =>
@@ -162,11 +176,14 @@ async function reverseGeocode(lat, lon) {
 }
 
 function levels(rep) {
-  const f = rep.flood, ss = rep.storm_surge, eq = rep.earthquake;
+  const f = rep.flood, ss = rep.storm_surge, eq = rep.earthquake, has = rep.data_available;
   const depthLevel = (rank) => (rank >= 3 ? "high" : rank === 2 ? "mid" : "low");
-  const flood = !f.in_zone ? "none" : depthLevel(f.max_assumed?.rank ?? 1);
-  const surge = !ss.in_zone ? "none" : (ss.max ?? 99) <= 0.5 ? "low" : (ss.max ?? 99) <= 3 ? "mid" : "high";
-  const slide = rep.landslide.some((z) => z.zone?.startsWith("special")) ? "high" : rep.landslide.length ? "mid" : "none";
+  // "nodata" is not "none": no published dataset for this area is different from "outside every zone"
+  const flood = f.in_zone ? depthLevel(f.max_assumed?.rank ?? 1) : has.flood ? "none" : "nodata";
+  const surge = ss.in_zone ? ((ss.max ?? 99) <= 0.5 ? "low" : (ss.max ?? 99) <= 3 ? "mid" : "high")
+    : has.storm_surge ? "none" : "nodata";
+  const slide = rep.landslide.some((z) => z.zone?.startsWith("special")) ? "high" : rep.landslide.length ? "mid"
+    : has.landslide ? "none" : "nodata";
   // J-SHIS's own map classes for 30-year probability: 3% / 6% / 26%
   const p6 = eq?.probability_30y?.["6-"];
   const quake = p6 == null ? null : p6 >= 0.26 ? "high" : p6 >= 0.06 ? "mid" : "low";
@@ -179,11 +196,12 @@ function chip(name, lv, text) {
 }
 
 function renderReport(rep, addr) {
-  const w = rep.location.ward;
+  const a = rep.location.area;
   const lv = levels(rep);
   const p6 = rep.earthquake?.probability_30y?.["6-"];
-  let html = `<div class="place"><h2>${esc(addr ? `${w.name_ja} ${addr}` : w.name_ja)}</h2>
-    <p>${esc(w.name_en)} ward · ${rep.location.lat.toFixed(5)}, ${rep.location.lon.toFixed(5)}</p></div>`;
+  const title = `${a.pref_ja} ${a.name_ja ?? ""}${addr && !addr.startsWith(a.pref_ja) ? ` ${addr}` : ""}`;
+  let html = `<div class="place"><h2>${esc(addr && addr.startsWith(a.pref_ja) ? addr : title)}</h2>
+    <p>${esc(a.pref_en)} · ${rep.location.lat.toFixed(5)}, ${rep.location.lon.toFixed(5)}</p></div>`;
 
   html += `<div class="chips">
     ${chip("Flood", lv.flood)}
@@ -203,6 +221,10 @@ function renderReport(rep, addr) {
 
 function floodCard(rep) {
   const f = rep.flood;
+  if (!f.in_zone && !rep.data_available.flood) {
+    return `<div class="card"><h3>🌊 River flood</h3>
+      <p>Flood data for this area is not loaded yet. Check the flood layer on the map, or the municipal hazard map.</p></div>`;
+  }
   if (!f.in_zone) {
     return `<div class="card"><h3>🌊 River flood</h3>
       <p>Not inside a designated river-flood zone.</p>
@@ -263,17 +285,18 @@ function quakeCard(eq) {
 }
 
 function otherCard(rep) {
-  const ss = rep.storm_surge, ts = rep.tsunami;
+  const ss = rep.storm_surge, ts = rep.tsunami, has = rep.data_available;
+  const notIn = (key) => (has[key] ? "Not in a designated zone" : "No published data for this prefecture");
   const slides = rep.landslide;
   const slideText = slides.length
     ? slides.map((z) => `${z.zone?.startsWith("special") ? "<b>Special warning zone (red)</b>" : "Warning zone (yellow)"}: ${esc(z.phenomenon?.replaceAll("_", " "))}${z.name ? ` · ${esc(z.name)}` : ""}`).join("<br>")
-    : "Not in a designated zone";
+    : notIn("landslide");
   return `<div class="card"><h3>⚠️ Other hazards</h3><dl>
-    <dt>Storm surge</dt><dd>${ss.in_zone ? `${esc(ss.depth_label)} (typhoon worst case)` : "Not in a designated zone"}</dd>
+    <dt>Storm surge</dt><dd>${ss.in_zone ? `${esc(ss.depth_label)} (typhoon worst case)` : notIn("storm_surge")}</dd>
     <dt>Landslide</dt><dd>${slideText}</dd>
-    <dt>Tsunami</dt><dd>${ts.in_zone ? esc(ts.depth_label) : "Not in a designated zone"}</dd>
+    <dt>Tsunami</dt><dd>${ts.in_zone ? esc(ts.depth_label) : notIn("tsunami")}</dd>
   </dl>
-  <p class="src">Sources: 国土数値情報 A49 storm surge (2020), A33 landslide (2023), A40 tsunami (2023)</p></div>`;
+  <p class="src">Sources: 国土数値情報 A49 storm surge, A33 landslide (2025), A40 tsunami (newest edition per prefecture)</p></div>`;
 }
 
 function shelterCard(s) {

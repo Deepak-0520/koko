@@ -30,9 +30,31 @@ def _range(rank, table):
     return {"rank": rank, "min": lo, "max": hi}
 
 
-def _ward(cur, p):
-    cur.execute(f"SELECT code, name_ja, name_en FROM koko.wards WHERE ST_Intersects(geom, {PT})", p)
+def _area(cur, p):
+    cur.execute(f"""
+        SELECT m.code, m.pref_code, m.pref_ja, m.pref_en, m.city_ja, m.ward_ja, m.name_ja
+        FROM koko.municipality_parts mp JOIN koko.municipalities m USING (code)
+        WHERE ST_Intersects(mp.geom, {PT}) LIMIT 1""", p)
     return cur.fetchone()
+
+
+def first_mesh(lat: float, lon: float) -> str:
+    """JIS 1st-order mesh code; flood data is published per mesh."""
+    return f"{int(lat * 1.5):02d}{int(lon) - 100:02d}"
+
+
+def _coverage(cur, pref: str, mesh: str) -> dict:
+    """Which datasets are loaded for this place. 'Not in a zone' only means something where data exists."""
+    cur.execute("SELECT layer, src FROM koko.loaded_files WHERE src = %s OR src LIKE %s",
+                (pref, f"{mesh}\\_%"))
+    have = {(r["layer"], r["src"].split("_")[0]) for r in cur.fetchall()}
+    return {
+        "flood": ("flood_depth", mesh) in have,
+        "landslide": ("landslide", pref) in have,
+        "tsunami": ("tsunami", pref) in have,
+        "storm_surge": ("storm_surge", pref) in have,
+        "shelters": ("shelters", pref) in have,
+    }
 
 
 def _flood(cur, p):
@@ -161,7 +183,7 @@ def _shelters(cur, p, hazards: list[str]):
 
 
 def _sources(cur):
-    cur.execute("SELECT source, title, url, rows, loaded_at FROM koko.source_meta ORDER BY source")
+    cur.execute("SELECT source, title, url FROM koko.source_meta ORDER BY source")
     out = {r["source"]: r for r in cur.fetchall()}
     out["jshis"] = {"source": "jshis", "title": jshis.TITLE, "url": jshis.URL}
     return out
@@ -170,9 +192,11 @@ def _sources(cur):
 def build_report(conn: Connection, lat: float, lon: float, *, with_earthquake: bool = True) -> dict:
     p = {"lat": lat, "lon": lon}
     with conn.cursor(row_factory=dict_row) as cur:
-        ward = _ward(cur, p)
-        if not ward:
-            raise OutsideCoverage("Only the Tokyo 23 wards are covered so far.")
+        area = _area(cur, p)
+        if not area:
+            raise OutsideCoverage("No data for this location: it is outside Japan, at sea, "
+                                  "or its prefecture has not been loaded yet.")
+        coverage = _coverage(cur, area["pref_code"], first_mesh(lat, lon))
         flood = _flood(cur, p)
         building = _building(cur, p)
         landslide = _landslide(cur, p)
@@ -182,7 +206,8 @@ def build_report(conn: Connection, lat: float, lon: float, *, with_earthquake: b
             ("flood", flood["in_zone"]), ("landslide", bool(landslide)),
             ("storm_surge", storm_surge["in_zone"]), ("tsunami", tsunami["in_zone"])) if present]
         report = {
-            "location": {"lat": lat, "lon": lon, "ward": ward},
+            "location": {"lat": lat, "lon": lon, "area": area},
+            "data_available": coverage,
             "flood": flood,
             "building": building,
             "vertical_evacuation": vertical_evacuation(building, flood),

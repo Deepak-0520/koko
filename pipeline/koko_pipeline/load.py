@@ -1,4 +1,8 @@
-"""Load staged GeoParquet files into PostGIS with COPY."""
+"""Load staged GeoParquet files into PostGIS with COPY, one file (= one `src`) at a time.
+
+Staged layout: data/staged/<layer>/<src>.parquet. A file is skipped when the same version
+(by modification time) is already loaded, so an interrupted national load can simply be rerun.
+"""
 from __future__ import annotations
 
 import json
@@ -17,17 +21,20 @@ from . import config
 log = logging.getLogger(__name__)
 SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
 
-# staged file stem -> (table, source key for attribution)
-TABLES = {
-    "wards": ("koko.wards", "wards"),
-    "flood_depth": ("koko.flood_depth", "flood_designated"),
-    "flood_duration": ("koko.flood_duration", "flood_designated"),
-    "flood_collapse": ("koko.flood_collapse", "flood_designated"),
+# layer -> (table, dataset key in config.DATASETS)
+LAYERS = {
+    "municipalities": ("koko.municipalities", "municipalities"),
+    "flood_depth": ("koko.flood_depth", "flood"),
+    "flood_duration": ("koko.flood_duration", "flood"),
+    "flood_collapse": ("koko.flood_collapse", "flood"),
     "landslide": ("koko.landslide", "landslide"),
     "tsunami": ("koko.tsunami", "tsunami"),
     "storm_surge": ("koko.storm_surge", "storm_surge"),
     "shelters": ("koko.shelters", "shelters"),
+    "buildings": ("koko.buildings", "buildings"),
 }
+SUBDIVIDE = {"flood_depth", "flood_duration", "flood_collapse", "landslide", "tsunami", "storm_surge"}
+MAX_VERTICES = 256
 
 
 def run_sql(conn: psycopg.Connection, name: str) -> None:
@@ -35,69 +42,112 @@ def run_sql(conn: psycopg.Connection, name: str) -> None:
 
 
 def _to_db_value(v):
-    if v is pd.NA:
+    if v is pd.NA or v is None:
         return None
     if isinstance(v, (list, dict)):
         return json.dumps(v, ensure_ascii=False)
     if isinstance(v, np.ndarray):
         return json.dumps(v.tolist(), ensure_ascii=False)
-    if isinstance(v, (np.integer,)):
+    if isinstance(v, np.integer):
         return int(v)
-    if isinstance(v, (np.floating,)):
+    if isinstance(v, (float, np.floating)):
         return None if np.isnan(v) else float(v)
-    if isinstance(v, float) and np.isnan(v):
-        return None
     return v
 
 
-def copy_gdf(conn: psycopg.Connection, gdf: gpd.GeoDataFrame, table: str, *, multi: bool = False) -> int:
+def copy_gdf(conn: psycopg.Connection, gdf: gpd.GeoDataFrame, table: str, *, multi: bool = False,
+             chunk: int = 200_000) -> int:
+    """COPY a GeoDataFrame as CSV, built by pandas in chunks (much faster than row-by-row)."""
     geoms = gdf.geometry
     if multi:
         geoms = geoms.map(lambda g: MultiPolygon([g]) if isinstance(g, Polygon) else g)
-    # hex EWKB with SRID 4326 is accepted directly by COPY into a geometry column
-    ewkb = shapely.to_wkb(shapely.set_srid(np.asarray(geoms), 4326), hex=True, include_srid=True)
     cols = [c for c in gdf.columns if c != gdf.geometry.name]
-    sql = f"COPY {table} ({', '.join(cols + ['geom'])}) FROM STDIN"
+    df = pd.DataFrame(gdf[cols])
+    for c in cols:  # JSON columns (e.g. PLATEAU risks) go in as text
+        if df[c].dtype == object and df[c].map(lambda v: isinstance(v, (list, dict, np.ndarray))).any():
+            df[c] = df[c].map(_to_db_value)
+    # hex EWKB with SRID 4326 is accepted directly by COPY into a geometry column
+    df["geom"] = shapely.to_wkb(shapely.set_srid(np.asarray(geoms), 4326), hex=True, include_srid=True)
+    sql = f"COPY {table} ({', '.join(cols + ['geom'])}) FROM STDIN WITH (FORMAT csv)"
     with conn.cursor() as cur, cur.copy(sql) as cp:
-        for values, g in zip(gdf[cols].itertuples(index=False, name=None), ewkb):
-            cp.write_row([_to_db_value(v) for v in values] + [g])
-    return len(gdf)
+        for start in range(0, len(df), chunk):
+            # unquoted empty fields are NULL in CSV COPY; real empty strings are written quoted
+            cp.write(df.iloc[start:start + chunk].to_csv(header=False, index=False))
+    return len(df)
 
 
-def _record(conn, source: str, rows: int, title: str | None = None, url: str | None = None) -> None:
-    src = config.SOURCES.get(source, {})
+def _subdivide(conn, table: str, src: str) -> None:
+    """Split polygons with more than MAX_VERTICES vertices so point-in-polygon stays cheap."""
+    cols = [r[0] for r in conn.execute(
+        """SELECT column_name FROM information_schema.columns
+           WHERE table_schema = 'koko' AND table_name = %s AND column_name <> 'geom' ORDER BY ordinal_position""",
+        (table.split(".")[1],)).fetchall()]
+    c = ", ".join(cols)
+    conn.execute(f"""
+        WITH big AS (DELETE FROM {table} WHERE src = %(src)s AND ST_NPoints(geom) > {MAX_VERTICES} RETURNING {c}, geom)
+        INSERT INTO {table} ({c}, geom) SELECT {c}, ST_Subdivide(geom, {MAX_VERTICES}) FROM big""", {"src": src})
+
+
+def _prepare(layer: str, gdf: gpd.GeoDataFrame, src: str) -> gpd.GeoDataFrame:
+    if layer == "municipalities":
+        return gdf
+    if layer == "buildings":
+        if "ward_code" in gdf.columns:  # files staged before the nationwide pipeline
+            gdf = gdf.rename(columns={"ward_code": "city_code"})
+        gdf = gdf.astype({"storeys_above": "Int16", "storeys_below": "Int16"})
+    gdf = gdf.copy()
+    gdf.insert(0, "src", src)
+    return gdf
+
+
+def _load_file(conn, layer: str, path: Path) -> int:
+    table = LAYERS[layer][0]
+    src = path.stem
+    gdf = _prepare(layer, gpd.read_parquet(path), src)
+    if layer == "municipalities":
+        conn.execute("DELETE FROM koko.municipality_parts WHERE code IN "
+                     "(SELECT code FROM koko.municipalities WHERE pref_code = %s)", (src,))
+        conn.execute("DELETE FROM koko.municipalities WHERE pref_code = %s", (src,))
+        n = copy_gdf(conn, gdf, table, multi=True)
+        conn.execute(f"""INSERT INTO koko.municipality_parts (code, geom)
+                         SELECT code, ST_Subdivide(geom, {MAX_VERTICES}) FROM koko.municipalities
+                         WHERE pref_code = %s""", (src,))
+    else:
+        conn.execute(f"DELETE FROM {table} WHERE src = %s", (src,))
+        n = copy_gdf(conn, gdf, table) if len(gdf) else 0
+        if layer in SUBDIVIDE:
+            _subdivide(conn, table, src)
     conn.execute(
-        """INSERT INTO koko.source_meta (source, title, url, rows) VALUES (%s, %s, %s, %s)
-           ON CONFLICT (source) DO UPDATE SET title = EXCLUDED.title, url = EXCLUDED.url,
+        """INSERT INTO koko.loaded_files (layer, src, file_mtime, rows) VALUES (%s, %s, %s, %s)
+           ON CONFLICT (layer, src) DO UPDATE SET file_mtime = EXCLUDED.file_mtime,
                rows = EXCLUDED.rows, loaded_at = now()""",
-        (source, title or src.get("title", source), url or src.get("url", ""), rows),
-    )
+        (layer, src, path.stat().st_mtime, n))
+    return n
 
 
-def load_all(staged_dir: Path | None = None, database_url: str | None = None) -> None:
+def load_all(layers: list[str] | None = None, *, reset: bool = False, force: bool = False,
+             database_url: str | None = None, staged_dir: Path | None = None) -> None:
     staged_dir = staged_dir or config.STAGED_DIR
-    with psycopg.connect(database_url or config.DATABASE_URL, autocommit=False) as conn:
+    with psycopg.connect(database_url or config.DATABASE_URL) as conn:
+        if reset:
+            run_sql(conn, "000_reset.sql")
         run_sql(conn, "001_schema.sql")
-        for stem, (table, source) in TABLES.items():
-            path = staged_dir / f"{stem}.parquet"
-            if not path.exists():
-                log.warning("skip %s (not staged)", stem)
-                continue
-            gdf = gpd.read_parquet(path)
-            conn.execute(f"TRUNCATE {table} RESTART IDENTITY")
-            n = copy_gdf(conn, gdf, table, multi=(stem == "wards"))
-            _record(conn, stem, n, title=config.SOURCES[source]["title"], url=config.SOURCES[source]["url"])
-            log.info("loaded %s: %d rows", table, n)
-
-        ward_files = sorted((staged_dir / "plateau").glob("*.parquet"))
-        if ward_files:
-            for path in ward_files:
-                gdf = gpd.read_parquet(path).astype({"storeys_above": "Int16", "storeys_below": "Int16"})
-                conn.execute("DELETE FROM koko.buildings WHERE ward_code = %s", (path.stem,))
-                n = copy_gdf(conn, gdf, "koko.buildings")
-                log.info("loaded buildings %s: %d rows", path.stem, n)
-            total = conn.execute("SELECT count(*) FROM koko.buildings").fetchone()[0]
-            _record(conn, "plateau", total)
-
-        run_sql(conn, "002_indexes.sql")
+        for key, d in config.DATASETS.items():
+            conn.execute("""INSERT INTO koko.source_meta (source, title, url) VALUES (%s, %s, %s)
+                            ON CONFLICT (source) DO UPDATE SET title = EXCLUDED.title, url = EXCLUDED.url""",
+                         (key, d["title"], d["page"]))
         conn.commit()
+
+        loaded = {(r[0], r[1]): r[2] for r in conn.execute("SELECT layer, src, file_mtime FROM koko.loaded_files")}
+        for layer in layers or LAYERS:
+            dirs = [staged_dir / layer] + ([staged_dir / "plateau"] if layer == "buildings" else [])
+            files = sorted(p for d in dirs if d.is_dir() for p in d.glob("*.parquet"))
+            todo = [p for p in files if force or loaded.get((layer, p.stem)) != p.stat().st_mtime]
+            log.info("%s: %d staged files, %d to load", layer, len(files), len(todo))
+            for i, path in enumerate(todo, 1):
+                n = _load_file(conn, layer, path)
+                conn.commit()  # per file, so an interrupted run keeps its progress
+                log.info("  [%d/%d] %s %s: %d rows", i, len(todo), layer, path.stem, n)
+            if todo:
+                conn.execute(f"ANALYZE {LAYERS[layer][0]}")
+                conn.commit()
