@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    container_name: koko-db
+    environment:
+      POSTGRES_DB: koko
+      POSTGRES_USER: koko
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-koko}
+    ports:
+      - "5432:5432"
+    volumes:
+      - koko-pgdata:/var/lib/postgresql/data
+    command: >
+      postgres -c shared_buffers=512MB -c work_mem=32MB -c maintenance_work_mem=512MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U koko -d koko"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  koko-pgdata:
