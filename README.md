@@ -96,3 +96,16 @@ tests/                    logic tests (pytest)
 - **PLATEAU sentinels:** 9999 / -9999 (unknown storeys or height) are stored as NULL.
 - **Licences:** 国土数値情報, PLATEAU, GSI, and J-SHIS each have attribution terms. Check them before any commercial use.
 - Shelter distances are straight-line; walking routes are a later phase.
+
+## Long national builds: the watchdog
+
+A full national build (every PLATEAU city) runs for a day or more. `scripts/watchdog.sh` keeps it going:
+every 2 minutes it checks Docker, the database, the API, disk space and the PLATEAU download,
+restarts what it can (Docker Desktop, the database container, a crashed download), loads newly staged
+files every 15 minutes, and retries failed cities once at the end. It exits `0` when everything is
+loaded, or `10` when something needs a person (API down, disk under 15 GB, repeated failures).
+Log: `data/logs/watchdog.log`.
+
+```bash
+bash scripts/watchdog.sh
+```

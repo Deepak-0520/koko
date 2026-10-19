@@ -139,6 +139,12 @@ def load_all(layers: list[str] | None = None, *, reset: bool = False, force: boo
              database_url: str | None = None, staged_dir: Path | None = None) -> None:
     staged_dir = staged_dir or config.STAGED_DIR
     with psycopg.connect(database_url or config.DATABASE_URL) as conn:
+        # one loader at a time: two loaders replacing the same src would collide
+        if not conn.execute("SELECT pg_try_advisory_lock(hashtext('koko_load'))").fetchone()[0]:
+            log.warning("another load is already running; skipping this one")
+            conn.rollback()
+            return
+        conn.commit()  # the session-level lock outlives the transaction; it is released on disconnect
         if reset:
             run_sql(conn, "000_reset.sql")
         run_sql(conn, "001_schema.sql")
