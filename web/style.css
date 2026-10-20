@@ -80,7 +80,8 @@ html, body { height: 100%; margin: 0; background: var(--bg); }
   position: absolute; z-index: 5; top: 58px; left: 10px; padding: 8px 10px; border-radius: 8px;
   background: var(--surface); box-shadow: 0 1px 4px rgba(0,0,0,.25); font-size: 12px; line-height: 1.9;
 }
-.layer-panel b { display: block; font-size: 12px; margin-bottom: 2px; }
+.layer-head { all: unset; cursor: pointer; display: block; font-size: 12px; font-weight: 700; }
+.layer-head:focus-visible { outline: 2px solid var(--accent); }
 .layer-panel label { display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
 .layer-panel label.off { color: var(--ink-3); cursor: default; }
 .layer-panel[hidden], .legend-map[hidden] { display: none; }

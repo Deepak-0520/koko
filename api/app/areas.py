@@ -229,9 +229,14 @@ def prefecture_stats(pref: str):
                         FROM koko.shelters WHERE src = %s""", (pref,))
         shelters = cur.fetchone()
         # PLATEAU datasets are keyed by city code, whose first two digits are the prefecture
+        # list the prefecture's datasets first, so the count uses the src index instead of
+        # scanning all 27M buildings (left(src, 2) = pref cannot use an index)
+        cur.execute("SELECT array_agg(src) AS srcs FROM koko.loaded_files WHERE layer = 'buildings' AND left(src, 2) = %s",
+                    (pref,))
+        srcs = cur.fetchone()["srcs"] or []
         cur.execute("""SELECT count(*) AS total, count(*) FILTER (WHERE flood_max_depth_m > 0) AS flooded,
                               count(DISTINCT src) AS cities
-                       FROM koko.buildings WHERE left(src, 2) = %s""", (pref,))
+                       FROM koko.buildings WHERE src = ANY(%s)""", (srcs,))
         bldg = cur.fetchone()
         stats = {
             "code": pref,
@@ -275,6 +280,8 @@ def tile(layer: str, z: int, x: int, y: int, muni: str = Query(..., pattern=r"^\
     if layer not in TILE_LAYERS:
         raise HTTPException(404, "unknown layer")
     table, cols, extra = TILE_LAYERS[layer]
+    # coarser tile grid when zoomed out: sub-pixel flood cells collapse and are dropped (2 MB -> far less)
+    extent = 4096 if z >= 13 else 2048 if z >= 11 else 1024
     with _pool.connection() as conn:
         row = conn.execute(f"""
             WITH env AS (SELECT ST_TileEnvelope(%(z)s, %(x)s, %(y)s) AS e3857,
@@ -283,13 +290,13 @@ def tile(layer: str, z: int, x: int, y: int, muni: str = Query(..., pattern=r"^\
                                 ST_Intersection(ST_Transform(ST_TileEnvelope(%(z)s, %(x)s, %(y)s), 4326),
                                                 (SELECT ST_Envelope(geom_display) FROM koko.municipalities
                                                  WHERE code = %(muni)s)) AS e4326)
-            SELECT ST_AsMVT(q, %(layer)s, 4096, 'geom') FROM (
+            SELECT ST_AsMVT(q, %(layer)s, %(extent)s, 'geom') FROM (
                 SELECT {cols},
-                       ST_AsMVTGeom(ST_Transform(t.geom, 3857), env.e3857, 4096, 64, true) AS geom
+                       ST_AsMVTGeom(ST_Transform(t.geom, 3857), env.e3857, %(extent)s, 64, true) AS geom
                 FROM {table} t, env
                 WHERE NOT ST_IsEmpty(env.e4326) AND t.geom && env.e4326 {extra}
                   AND EXISTS (SELECT 1 FROM koko.municipality_parts mp
                               WHERE mp.code = %(muni)s AND mp.geom && env.e4326 AND ST_Intersects(mp.geom, t.geom))
-            ) q WHERE q.geom IS NOT NULL""", {"z": z, "x": x, "y": y, "layer": layer, "muni": muni}).fetchone()
+            ) q WHERE q.geom IS NOT NULL""", {"z": z, "x": x, "y": y, "layer": layer, "muni": muni, "extent": extent}).fetchone()
     return Response(content=bytes(row[0] or b""), media_type="application/vnd.mapbox-vector-tile",
                     headers={"Cache-Control": "public, max-age=600"})

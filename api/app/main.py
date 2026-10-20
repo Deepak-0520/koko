@@ -140,6 +140,8 @@ class Selection(BaseModel):
     lat: float = Field(ge=20, le=46)
     lon: float = Field(ge=122, le=154)
     label: str | None = Field(default=None, max_length=200)
+    area_code: str | None = Field(default=None, pattern=r"^\d{5}$")
+    kind: Literal["area", "point"] = "point"
 
 
 class ChatRequest(BaseModel):

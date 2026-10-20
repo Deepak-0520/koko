@@ -38,7 +38,8 @@ def all_city_codes() -> list[str]:
     """Every city with PLATEAU building data, smallest download first (quick wins before the huge ones)."""
     latest: dict[str, dict] = {}
     for r in _catalog():
-        if "bldg" in (r.get("feature_types") or []):
+        # skip demo datasets such as 13999 東京都サンプルデータ（竹芝モデル）: their buildings duplicate real cities
+        if "bldg" in (r.get("feature_types") or []) and "サンプル" not in r.get("city", ""):
             if r["city_code"] not in latest or r["year"] > latest[r["city_code"]]["year"]:
                 latest[r["city_code"]] = r
     return [c for c, _ in sorted(latest.items(), key=lambda kv: kv[1]["file_size"])]

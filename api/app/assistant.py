@@ -14,7 +14,9 @@ from collections.abc import AsyncIterator
 
 import anthropic
 import httpx
+from fastapi import HTTPException
 
+from . import areas
 from .report import OutsideCoverage, build_report
 
 log = logging.getLogger(__name__)
@@ -26,12 +28,16 @@ GSI_SEARCH = "https://msearch.gsi.go.jp/address-search/AddressSearch"
 SYSTEM = """You are KOKO (ここ), a disaster-risk assistant for people living in or moving to Japan, \
 many of them foreign residents who do not read Japanese.
 
-You answer questions about specific places using two tools:
+You answer questions about specific places using three tools:
 - search_address: turns a Japanese address or place name into coordinates.
 - get_risk_report: returns official hazard data for a point: river flood depth and duration, \
 house-collapse zones, the building at that point (PLATEAU: storeys, height, flood depth), which floor \
 stays dry, landslide / storm surge / tsunami zones, 30-year earthquake shaking probabilities (J-SHIS), \
-and the nearest evacuation sites rated for each hazard.
+and the nearest evacuation sites rated for each hazard. The report includes the point's municipality code.
+- get_area_stats: statistics for a whole municipality (市区町村) by its 5-digit code: share of its area in \
+each hazard zone, PLATEAU buildings by expected flood depth (including low-rise buildings facing 3 m or more), \
+evacuation sites by hazard type, and shaking probabilities at its centre. Use it for questions about a \
+ward, city or town as a whole; use get_risk_report for a specific address or spot.
 
 Rules:
 - Every number, zone or place name in your answer must come from a tool result in this conversation. \
@@ -74,6 +80,19 @@ TOOLS = [
                 "lon": {"type": "number", "description": "Longitude (WGS84)"},
             },
             "required": ["lat", "lon"],
+            "additionalProperties": False,
+        },
+        "eager_input_streaming": True,
+    },
+    {
+        "name": "get_area_stats",
+        "description": "Hazard statistics for one municipality (市区町村) of Japan by its 5-digit code "
+                       "(e.g. 13123 = 江戸川区): area share in each hazard zone, PLATEAU buildings by expected "
+                       "flood depth, evacuation sites by hazard type, earthquake probabilities at its centre.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"code": {"type": "string", "description": "5-digit municipality code"}},
+            "required": ["code"],
             "additionalProperties": False,
         },
         "eager_input_streaming": True,
@@ -121,7 +140,16 @@ async def _run_tool(pool, name: str, args) -> tuple[str, bool]:
                     return build_report(conn, float(lat), float(lon))
             rep = await asyncio.to_thread(run)
             return json.dumps(_compact_report(rep), ensure_ascii=False, default=str), False
+        if name == "get_area_stats":
+            code = (args or {}).get("code")
+            if not (isinstance(code, str) and len(code) == 5 and code.isdigit()):
+                return json.dumps({"INVALID_INPUT": args, "hint": "a 5-digit municipality code"}), True
+            stats = await asyncio.to_thread(areas.municipality_stats, code)
+            return json.dumps({k: v for k, v in stats.items() if k != "flood_depth_classes"},
+                              ensure_ascii=False, default=str), False
         return json.dumps({"error": f"unknown tool {name}"}), True
+    except HTTPException as e:  # e.g. unknown municipality code
+        return json.dumps({"error": str(e.detail)}), True
     except OutsideCoverage as e:
         return json.dumps({"error": str(e)}), True
     except httpx.HTTPError as e:
@@ -199,9 +227,13 @@ async def chat_stream(pool, history: list[dict], selection: dict | None, lang: s
     messages = [{"role": m["role"], "content": m["content"]} for m in history if m.get("content")]
     if messages and messages[-1]["role"] == "user":
         ctx = f"[Interface language: {LANG_NAMES.get(lang, 'English')}]\n"
-        if selection:
-            ctx += f"[Map selection: lat {selection['lat']:.5f}, lon {selection['lon']:.5f}" + \
-                   (f", {selection['label']}" if selection.get("label") else "") + "]\n"
+        if selection and selection.get("kind") == "area":
+            ctx += (f"[Map selection: the whole municipality {selection.get('label') or ''} "
+                    f"(code {selection.get('area_code')}); for questions about it use get_area_stats]\n")
+        elif selection:
+            ctx += f"[Map selection: point lat {selection['lat']:.5f}, lon {selection['lon']:.5f}" + \
+                   (f", {selection['label']}" if selection.get("label") else "") + \
+                   (f", municipality code {selection['area_code']}" if selection.get("area_code") else "") + "]\n"
         messages[-1] = {"role": "user", "content": ctx + messages[-1]["content"]}
 
     client = anthropic.AsyncAnthropic()

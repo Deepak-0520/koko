@@ -77,6 +77,14 @@ def copy_gdf(conn: psycopg.Connection, gdf: gpd.GeoDataFrame, table: str, *, mul
     return len(df)
 
 
+def _make_valid(conn, table: str, src: str) -> None:
+    """Repair self-intersecting rings from the source data (about 1% of KSJ flood polygons);
+    invalid polygons can give wrong point-in-polygon answers near their edges."""
+    conn.execute(f"""UPDATE {table} SET geom = ST_CollectionExtract(ST_MakeValid(geom), 3)
+                     WHERE src = %(src)s AND NOT ST_IsValid(geom)""", {"src": src})
+    conn.execute(f"DELETE FROM {table} WHERE src = %(src)s AND ST_IsEmpty(geom)", {"src": src})
+
+
 def _subdivide(conn, table: str, src: str) -> None:
     """Split polygons with more than MAX_VERTICES vertices so point-in-polygon stays cheap."""
     cols = [r[0] for r in conn.execute(
@@ -126,6 +134,7 @@ def _load_file(conn, layer: str, path: Path) -> int:
         conn.execute(f"DELETE FROM {table} WHERE src = %s", (src,))
         n = copy_gdf(conn, gdf, table) if len(gdf) else 0
         if layer in SUBDIVIDE:
+            _make_valid(conn, table, src)
             _subdivide(conn, table, src)
     conn.execute(
         """INSERT INTO koko.loaded_files (layer, src, file_mtime, rows) VALUES (%s, %s, %s, %s)

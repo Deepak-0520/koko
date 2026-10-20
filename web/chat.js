@@ -70,6 +70,7 @@ function renderToolNote(div) {
   const name = div.dataset.tool, input = JSON.parse(div.dataset.input);
   if (name === "search_address") div.innerHTML = t("chat.tool.search", { q: esc(input.query) });
   else if (name === "get_risk_report") div.innerHTML = t("chat.tool.report", { lat: (+input.lat).toFixed(4), lon: (+input.lon).toFixed(4) });
+  else if (name === "get_area_stats") div.innerHTML = t("chat.tool.area", { code: esc(input.code) });
   else div.textContent = `⚙️ ${name}`;
 }
 

@@ -2,6 +2,7 @@ services:
   db:
     image: postgis/postgis:17-3.5
     container_name: koko-db
+    restart: unless-stopped  # come back by itself after Docker Desktop or the PC restarts
     # Docker's default 64 MB /dev/shm is too small for PostgreSQL's parallel queries on this data
     shm_size: 1gb
     environment:

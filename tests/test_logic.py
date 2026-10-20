@@ -87,3 +87,13 @@ def test_first_meshes_cover_an_area():
     from koko_pipeline.cli import first_meshes
     assert first_meshes(box(139.7, 35.6, 139.8, 35.7)) == {"5339"}
     assert first_meshes(box(135.3, 34.6, 135.6, 34.7)) == {"5135", "5235"}  # crosses 34°40'
+
+
+def test_area_stats_tool_rejects_bad_codes():
+    import asyncio
+    import json
+
+    from app.assistant import _run_tool
+    for bad in [{}, {"code": "123"}, {"code": "abcde"}, {"code": 13123}]:
+        text, is_error = asyncio.run(_run_tool(None, "get_area_stats", bad))  # never reaches the database
+        assert is_error and "INVALID_INPUT" in json.loads(text)

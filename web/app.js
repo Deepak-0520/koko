@@ -306,7 +306,7 @@ async function selectMuni(code, { fly = true, keepPoint = false } = {}) {
   if (!keepPoint) clearPoint();
   if (fly) fit(m.bbox);
   const c = [(m.bbox[0] + m.bbox[2]) / 2, (m.bbox[1] + m.bbox[3]) / 2];
-  if (!keepPoint) selection = { lat: c[1], lon: c[0], label: `${m.pref_ja}${m.name_ja}` };
+  if (!keepPoint) selection = { lat: c[1], lon: c[0], label: `${m.pref_ja}${m.name_ja}`, area_code: code, kind: "area" };
   renderNav();
   if (!keepPoint) { renderBody(); loadStats("muni", `/areas/municipalities/${code}/stats`, code); }
 }
@@ -443,7 +443,7 @@ function clearPoint() {
 async function runReport(lat, lon, label) {
   if (pointMarker) pointMarker.setLngLat([lon, lat]);
   else pointMarker = new maplibregl.Marker({ color: COLORS.accent }).setLngLat([lon, lat]).addTo(map);
-  selection = { lat, lon, label: label || null };
+  selection = { lat, lon, label: label || null, kind: "point" };
   state.view = "point";
   lastReport = null;
   body.innerHTML = `<div class="loading">${t("report.checking", { lat: lat.toFixed(5), lon: lon.toFixed(5) })}</div>`;
@@ -458,6 +458,7 @@ async function runReport(lat, lon, label) {
     ]);
     const a = rep.location.area;
     selection.label = addr && addr.startsWith(a.pref_ja) ? addr : `${a.pref_ja}${a.name_ja ?? ""}${addr ? ` ${addr}` : ""}`;
+    selection.area_code = a.code;
     lastReport = { rep, addr };
     if (state.muni?.code !== a.code) await selectMuni(a.code, { fly: false, keepPoint: true });
     showReport();
@@ -487,7 +488,8 @@ body.addEventListener("click", (e) => {
     clearPoint();
     state.view = "area";
     const m = state.muni;
-    selection = { lat: (m.bbox[1] + m.bbox[3]) / 2, lon: (m.bbox[0] + m.bbox[2]) / 2, label: `${m.pref_ja}${m.name_ja}` };
+    selection = { lat: (m.bbox[1] + m.bbox[3]) / 2, lon: (m.bbox[0] + m.bbox[2]) / 2, label: `${m.pref_ja}${m.name_ja}`,
+      area_code: m.code, kind: "area" };
     renderBody();
   }
 });
@@ -542,17 +544,21 @@ toggleBtn.addEventListener("click", () => {
 const layerPanel = document.getElementById("layer-panel");
 const legendEl = document.getElementById("legend");
 let photoOn = false;
+let layersOpen = window.innerWidth >= 820;  // collapsed on small screens, where it would cover the map
 
 function renderLayerPanel() {
   // the switcher appears once a municipality is selected: that is when there are layers to switch
   const row = (key, label, checked) =>
     `<label><input type="checkbox" data-layer="${key}" ${checked ? "checked" : ""}> ${label}</label>`;
-  layerPanel.innerHTML = `<b>${t("layers.title")}</b>` +
-    Object.keys(AREA_LAYERS).map((k) => row(k, t(`layers.${k}`), AREA_LAYERS[k].visible)).join("") +
-    row("photo", t("layers.photo"), photoOn);
+  layerPanel.innerHTML = `<button type="button" class="layer-head" aria-expanded="${layersOpen}">${t("layers.title")} ${layersOpen ? "▾" : "▸"}</button>` +
+    (layersOpen ? Object.keys(AREA_LAYERS).map((k) => row(k, t(`layers.${k}`), AREA_LAYERS[k].visible)).join("") +
+      row("photo", t("layers.photo"), photoOn) : "");
   layerPanel.hidden = state.level !== "muni";
 }
 
+layerPanel.addEventListener("click", (e) => {
+  if (e.target.closest(".layer-head")) { layersOpen = !layersOpen; renderLayerPanel(); }
+});
 layerPanel.addEventListener("change", (e) => {
   const key = e.target.dataset.layer;
   if (key === "photo") {
