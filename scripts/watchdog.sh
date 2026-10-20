@@ -89,6 +89,7 @@ while true; do
     elif grep -q "^exit" data/logs/plateau_retry.log 2>/dev/null && [ "$(pipeline_running "load")" = "0" ]; then
       # everything staged: one last load, then finish
       log "retry finished: final load"
+      sleep 70  # the loader skips files written in the last minute; let the newest one settle
       "$PY" -I -X utf8 -m koko_pipeline load >> data/logs/load_watchdog.log 2>&1
       n=$(timeout 30 docker exec koko-db psql -U koko -d koko -tAc "select count(*) || ' datasets, ' || sum(rows) || ' buildings' from koko.loaded_files where layer='buildings'")
       failed=$(grep -c "FAILED" data/logs/plateau_retry.log)
